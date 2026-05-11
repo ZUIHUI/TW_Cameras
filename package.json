@@ -13,6 +13,7 @@
     "typecheck": "pnpm --filter @taiwan-live-cam/api typecheck && pnpm --filter @taiwan-live-cam/web typecheck"
   },
   "devDependencies": {
+    "@types/node": "^22.15.3",
     "concurrently": "^9.1.2",
     "typescript": "^5.8.3"
   },

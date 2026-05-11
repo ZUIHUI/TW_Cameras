@@ -34,6 +34,26 @@ pnpm run dev
 - `GET /api/sources`
 - `GET /api/health`
 
+## 部署到 Vercel
+
+這個 repo 已包含 `vercel.json` 與 `/api` Vercel Functions。部署時請在 Vercel 使用 repo 根目錄，不要把 Root Directory 改成 `apps/web`。
+
+建議設定：
+
+- Framework Preset: `Vite`
+- Install Command: `pnpm install --frozen-lockfile`
+- Build Command: `pnpm --filter @taiwan-live-cam/web build`
+- Output Directory: `apps/web/dist`
+
+Vercel Environment Variables 請設定：
+
+- `CWA_API_KEY`
+- `MOENV_API_KEY`
+- `TDX_CLIENT_ID`：TDX 審核通過後再補
+- `TDX_CLIENT_SECRET`：TDX 審核通過後再補
+
+TDX key 尚未設定時，`/api/cameras` 會回傳空清單與來源錯誤提示，網站仍可部署與載入。
+
 ## 資料來源
 
 - TDX 運輸資料流通服務
