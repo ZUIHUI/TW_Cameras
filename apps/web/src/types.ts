@@ -1,5 +1,5 @@
 export type CameraCategory = "freeway" | "highway" | "city";
-export type StreamType = "hls" | "mjpeg" | "snapshot" | "unknown";
+export type StreamType = "hls" | "mjpeg" | "snapshot" | "webpage" | "unknown";
 export type CameraStatus = "online" | "offline" | "unknown";
 
 export interface Camera {

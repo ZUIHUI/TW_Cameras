@@ -58,6 +58,10 @@ export function DetailPanel({
         {camera && (
           <>
             <div>
+              <span>行政區</span>
+              <strong>{formatCountyTown(camera)}</strong>
+            </div>
+            <div>
               <span>串流</span>
               <strong>{camera.streamType.toUpperCase()}</strong>
             </div>
@@ -130,6 +134,25 @@ function StreamPreview({ camera }: { camera: Camera }) {
     );
   }
 
+  if (camera.streamType === "webpage") {
+    return (
+      <div className="stream-frame webpage">
+        <iframe
+          allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+          allowFullScreen
+          referrerPolicy="no-referrer"
+          sandbox="allow-forms allow-same-origin allow-scripts allow-presentation"
+          src={camera.streamUrl}
+          title={`${camera.title} 即時影像播放頁`}
+        />
+        <a className="stream-open-source" href={camera.sourcePageUrl || camera.streamUrl} rel="noreferrer" target="_blank">
+          <ExternalLink size={16} />
+          開啟來源
+        </a>
+      </div>
+    );
+  }
+
   return (
     <div className="stream-frame">
       <video controls muted playsInline preload="metadata" src={camera.streamUrl} />
@@ -139,6 +162,10 @@ function StreamPreview({ camera }: { camera: Camera }) {
       </div>
     </div>
   );
+}
+
+function formatCountyTown(camera: Camera) {
+  return [camera.county, camera.town].filter(Boolean).join(" ") || "未標示縣市";
 }
 
 function EnvironmentBlock({ environment, error }: { environment?: EnvironmentSummary; error: string }) {

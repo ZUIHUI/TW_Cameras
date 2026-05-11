@@ -1,9 +1,14 @@
 import { timedCache } from "../cache.js";
 import { missingEnv } from "../config.js";
+import { UpstreamError } from "../http.js";
 import { tdxGet } from "../tdx.js";
 import type { Camera, CameraCatalog, CameraCategory, SourceError, StreamType, VehicleDetector } from "../types.js";
+import { resolveTownFromCoordinate } from "./townResolver.js";
 
 const CAMERA_TTL_MS = 20 * 60 * 1000;
+const TDX_SCOPE_CONCURRENCY = 2;
+const TDX_SCOPE_GAP_MS = 400;
+const TDX_RETRY_DELAYS_MS = [1500];
 
 const cityScopes = [
   ["Taipei", "臺北市"],
@@ -116,7 +121,7 @@ async function loadCameraCatalog(): Promise<CameraCatalog> {
 }
 
 async function loadCameraCatalogData(): Promise<{ cameras: Camera[]; sourceErrors: SourceError[] }> {
-  const settled = await Promise.allSettled(scopes.map(loadScope));
+  const settled = await allSettledWithConcurrency(scopes, TDX_SCOPE_CONCURRENCY, loadScope);
   const cameras: Camera[] = [];
   const sourceErrors: SourceError[] = [];
 
@@ -145,7 +150,7 @@ async function loadCameraCatalogData(): Promise<{ cameras: Camera[]; sourceError
 
 async function loadVehicleDetectorCatalog(): Promise<{ vehicleDetectors: VehicleDetector[]; sourceErrors: SourceError[] }> {
   try {
-    const payload = await tdxGet<unknown>("/Road/Traffic/VD/Freeway");
+    const payload = await withTdxRetry(() => tdxGet<unknown>("/Road/Traffic/VD/Freeway"));
     const vdData = payload as { VDs: unknown[] };
     const rows = vdData.VDs || [];
     
@@ -173,9 +178,63 @@ async function loadVehicleDetectorCatalog(): Promise<{ vehicleDetectors: Vehicle
 }
 
 async function loadScope(scope: CameraScope): Promise<Camera[]> {
-  const payload = await tdxGet<unknown>(scope.path);
+  const payload = await withTdxRetry(() => tdxGet<unknown>(scope.path));
   const rows = pickArray(payload);
   return rows.map((row) => normalizeCamera(row, scope)).filter((camera): camera is Camera => Boolean(camera));
+}
+
+async function allSettledWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  task: (item: T) => Promise<R>
+): Promise<Array<PromiseSettledResult<R>>> {
+  const results: Array<PromiseSettledResult<R>> = [];
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+
+      try {
+        results[index] = { status: "fulfilled", value: await task(items[index]) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+
+      await sleep(TDX_SCOPE_GAP_MS);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
+async function withTdxRetry<T>(task: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt <= TDX_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await task();
+    } catch (error) {
+      const shouldRetry = isRetryableTdxError(error) && attempt < TDX_RETRY_DELAYS_MS.length;
+      if (!shouldRetry) {
+        throw error;
+      }
+
+      await sleep(TDX_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
+  throw new Error("TDX retry loop exited unexpectedly.");
+}
+
+function isRetryableTdxError(error: unknown): boolean {
+  return error instanceof UpstreamError && (error.status === 429 || error.status >= 500);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function normalizeCamera(row: unknown, scope: CameraScope): Camera | undefined {
@@ -196,7 +255,7 @@ function normalizeCamera(row: unknown, scope: CameraScope): Camera | undefined {
   const location = firstString(row, ["LocationDescription", "Location", "LocationMile", "MilePost"]) || "";
   const direction = firstString(row, ["RoadDirection", "Direction", "Bearing"]) || "";
   const county = firstString(row, ["CountyName", "CityName", "County", "City"]) || scope.county;
-  const town = firstString(row, ["TownName", "Town", "District"]) || "";
+  const town = firstString(row, ["TownName", "Town", "District"]) || resolveTownFromCoordinate(county, lat, lon);
   const updatedAt = firstString(row, ["UpdateTime", "UpdatedTime", "DataCollectTime", "SrcUpdateTime"]) || new Date().toISOString();
 
   return {
@@ -314,7 +373,22 @@ function detectStreamType(url: string): StreamType {
   if (lower.includes(".m3u8")) return "hls";
   if (lower.includes("mjpeg") || lower.includes("mjpg")) return "mjpeg";
   if (lower.includes(".jpg") || lower.includes(".jpeg") || lower.includes(".png")) return "snapshot";
+  if (isWebpageStreamUrl(lower)) return "webpage";
   return "unknown";
+}
+
+function isWebpageStreamUrl(lowerUrl: string): boolean {
+  if (lowerUrl.includes("hls.bote.gov.taipei/live/index.html")) {
+    return true;
+  }
+
+  return [".html", ".htm"].some((extension) => {
+    const extensionIndex = lowerUrl.indexOf(extension);
+    if (extensionIndex === -1) return false;
+
+    const nextChar = lowerUrl[extensionIndex + extension.length];
+    return !nextChar || nextChar === "?" || nextChar === "#" || nextChar === "/";
+  });
 }
 
 function isTaiwanCoordinate(lat: number, lon: number): boolean {

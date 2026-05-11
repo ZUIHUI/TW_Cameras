@@ -283,7 +283,7 @@ export default function App() {
               <span className="camera-copy">
                 <strong>{camera.title}</strong>
                 <small>
-                  {camera.county || "未標示縣市"} · {categoryLabel(camera.category)} · {camera.streamType.toUpperCase()}
+                  {formatCountyTown(camera)} · {categoryLabel(camera.category)} · {camera.streamType.toUpperCase()}
                 </small>
               </span>
               {favorites.has(camera.id) && <Heart className="favorite-mark" size={16} fill="currentColor" />}
@@ -342,6 +342,10 @@ function loadFavorites(): Set<string> {
 
 function normalize(value: string) {
   return value.toLowerCase().replaceAll("台", "臺").trim();
+}
+
+function formatCountyTown(camera: Camera) {
+  return [camera.county, camera.town].filter(Boolean).join(" ") || "未標示縣市";
 }
 
 function distanceKm(location: UserLocation, camera: Camera) {

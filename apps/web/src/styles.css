@@ -404,12 +404,40 @@ h3 {
 }
 
 .stream-frame video,
-.stream-frame img {
+.stream-frame img,
+.stream-frame iframe {
   position: relative;
   z-index: 2;
   width: 100%;
   height: 100%;
+  border: 0;
   object-fit: contain;
+}
+
+.stream-frame.webpage iframe {
+  background: #ffffff;
+}
+
+.stream-open-source {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 3;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 8px;
+  background: rgba(14, 24, 21, 0.86);
+  color: #ffffff;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.stream-open-source:hover {
+  background: rgba(31, 75, 58, 0.94);
 }
 
 .stream-fallback {
