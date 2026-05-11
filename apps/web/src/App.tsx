@@ -15,11 +15,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getCameras, getEnvironment } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
+import { GOOGLE_MAPS_API_KEY, loadGooglePlaces } from "./googleMaps";
 import type {
   Camera,
   CameraCatalogResponse,
   CameraFilter,
   EnvironmentSummary,
+  SearchPlace,
   UserLocation,
   VehicleDetector,
   VisibleLayers
@@ -31,6 +33,7 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
   { id: "freeway", label: "國道" },
   { id: "highway", label: "省道/公路" },
   { id: "city", label: "市區" },
+  { id: "scenic", label: "風景區" },
   { id: "favorites", label: "收藏" }
 ];
 
@@ -41,6 +44,9 @@ export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
   const [selectedCamera, setSelectedCamera] = useState<Camera | undefined>();
   const [selectedVehicleDetector, setSelectedVehicleDetector] = useState<VehicleDetector | undefined>();
+  const [searchPlace, setSearchPlace] = useState<SearchPlace | undefined>();
+  const [placePredictions, setPlacePredictions] = useState<google.maps.places.AutocompletePrediction[]>([]);
+  const [placesError, setPlacesError] = useState("");
   const [environment, setEnvironment] = useState<EnvironmentSummary | undefined>();
   const [query, setQuery] = useState("");
   const [cameraFilter, setCameraFilter] = useState<CameraFilter>("all");
@@ -56,6 +62,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [environmentError, setEnvironmentError] = useState("");
   const locationRequestInFlight = useRef(false);
+  const filterBeforePlaceSearch = useRef<CameraFilter>("all");
 
   const summary = catalog?.summary;
 
@@ -102,6 +109,36 @@ export default function App() {
   useEffect(() => {
     setVisibleCount(80);
   }, [cameraFilter, query, visibleLayers.cameras, visibleLayers.vehicleDetectors]);
+
+  useEffect(() => {
+    const keyword = query.trim();
+    setPlacesError("");
+
+    if (!GOOGLE_MAPS_API_KEY || keyword.length < 2) {
+      setPlacePredictions([]);
+      return;
+    }
+
+    let active = true;
+    const timeout = window.setTimeout(() => {
+      loadGooglePlaces()
+        .then(() => getPlacePredictions(keyword))
+        .then((predictions) => {
+          if (active) setPlacePredictions(predictions.slice(0, 5));
+        })
+        .catch((err: unknown) => {
+          if (active) {
+            setPlacePredictions([]);
+            setPlacesError(err instanceof Error ? err.message : String(err));
+          }
+        });
+    }, 260);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [query]);
 
   async function loadCameras() {
     setLoading(true);
@@ -184,11 +221,13 @@ export default function App() {
   function selectCamera(camera: Camera) {
     setSelectedCamera(camera);
     setSelectedVehicleDetector(undefined);
+    setSearchPlace(undefined);
   }
 
   function selectVehicleDetector(vehicleDetector: VehicleDetector) {
     setSelectedVehicleDetector(vehicleDetector);
     setSelectedCamera(undefined);
+    setSearchPlace(undefined);
   }
 
   const filteredCameras = useMemo(() => {
@@ -198,6 +237,8 @@ export default function App() {
 
     const allCameras = catalog?.cameras ?? [];
     const normalizedQuery = normalize(query);
+    const activeLocation = searchPlace || userLocation;
+    const shouldFilterText = Boolean(normalizedQuery && !searchPlace);
 
     const filtered = allCameras.filter((camera) => {
       const matchesFilter =
@@ -207,21 +248,21 @@ export default function App() {
         camera.category === cameraFilter;
 
       if (!matchesFilter) return false;
-      if (!normalizedQuery) return true;
+      if (!shouldFilterText) return true;
 
       return normalize([camera.title, camera.county, camera.town, camera.roadName, camera.source].join(" ")).includes(
         normalizedQuery
       );
     });
 
-    if (cameraFilter === "nearby" && userLocation) {
+    if (cameraFilter === "nearby" && activeLocation) {
       return [...filtered]
-        .sort((a, b) => distanceKm(userLocation, a) - distanceKm(userLocation, b))
+        .sort((a, b) => distanceKm(activeLocation, a) - distanceKm(activeLocation, b))
         .slice(0, 160);
     }
 
     return filtered;
-  }, [catalog?.cameras, cameraFilter, favorites, query, userLocation, visibleLayers.cameras]);
+  }, [catalog?.cameras, cameraFilter, favorites, query, searchPlace, userLocation, visibleLayers.cameras]);
 
   const filteredVehicleDetectors = useMemo(() => {
     if (!visibleLayers.vehicleDetectors) {
@@ -230,22 +271,109 @@ export default function App() {
 
     const normalizedQuery = normalize(query);
     const allVehicleDetectors = catalog?.vehicleDetectors ?? [];
+    const activeLocation = searchPlace || userLocation;
+    const shouldFilterText = Boolean(normalizedQuery && !searchPlace);
     const filtered = allVehicleDetectors.filter((vd) => {
-      if (!normalizedQuery) return true;
+      if (!shouldFilterText) return true;
 
       return normalize([vd.title, vd.roadName, vd.roadSection.start, vd.roadSection.end, vd.source].join(" ")).includes(
         normalizedQuery
       );
     });
 
-    if (cameraFilter === "nearby" && userLocation) {
+    if (cameraFilter === "nearby" && activeLocation) {
       return [...filtered]
-        .sort((a, b) => distanceKm(userLocation, a) - distanceKm(userLocation, b))
+        .sort((a, b) => distanceKm(activeLocation, a) - distanceKm(activeLocation, b))
         .slice(0, 160);
     }
 
     return filtered;
-  }, [cameraFilter, catalog?.vehicleDetectors, query, userLocation, visibleLayers.vehicleDetectors]);
+  }, [cameraFilter, catalog?.vehicleDetectors, query, searchPlace, userLocation, visibleLayers.vehicleDetectors]);
+
+  const localSearchMatches = useMemo(() => {
+    const normalizedQuery = normalize(query);
+    if (!normalizedQuery || searchPlace) {
+      return [];
+    }
+
+    const cameraMatches = (catalog?.cameras ?? [])
+      .filter((camera) =>
+        normalize([camera.title, camera.county, camera.town, camera.roadName, camera.source].join(" ")).includes(
+          normalizedQuery
+        )
+      )
+      .slice(0, 8)
+      .map((camera) => ({ id: camera.id, kind: "camera" as const, title: camera.title, subtitle: formatCountyTown(camera), item: camera }));
+    const vdMatches = (catalog?.vehicleDetectors ?? [])
+      .filter((vd) => normalize([vd.title, vd.roadName, vd.roadSection.start, vd.roadSection.end, vd.source].join(" ")).includes(normalizedQuery))
+      .slice(0, Math.max(0, 8 - cameraMatches.length))
+      .map((vd) => ({ id: vd.id, kind: "vd" as const, title: vd.title, subtitle: vd.roadName || "VD", item: vd }));
+
+    return [...cameraMatches, ...vdMatches].slice(0, 8);
+  }, [catalog?.cameras, catalog?.vehicleDetectors, query, searchPlace]);
+
+  const showSearchResults = Boolean(query.trim()) && (localSearchMatches.length > 0 || placePredictions.length > 0 || placesError);
+
+  function clearSearch() {
+    setQuery("");
+    setSearchPlace(undefined);
+    setPlacePredictions([]);
+    setPlacesError("");
+    setCameraFilter(filterBeforePlaceSearch.current);
+  }
+
+  function activatePlaceSearch(place: SearchPlace) {
+    if (!searchPlace) {
+      filterBeforePlaceSearch.current = cameraFilter;
+    }
+
+    setSearchPlace(place);
+    setSelectedCamera(undefined);
+    setSelectedVehicleDetector(undefined);
+    setQuery(place.title);
+    setPlacePredictions([]);
+    setVisibleLayers((current) => ({ ...current, cameras: true, vehicleDetectors: true }));
+    setCameraFilter("nearby");
+  }
+
+  async function selectPlacePrediction(prediction: google.maps.places.AutocompletePrediction) {
+    try {
+      const place = await getPlaceDetails(prediction.place_id);
+      activatePlaceSearch(place);
+    } catch (err) {
+      setPlacesError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function submitSearch() {
+    const firstLocal = localSearchMatches[0];
+    if (firstLocal?.kind === "camera") {
+      selectCamera(firstLocal.item);
+      return;
+    }
+    if (firstLocal?.kind === "vd") {
+      selectVehicleDetector(firstLocal.item);
+      return;
+    }
+
+    const firstPrediction = placePredictions[0];
+    if (firstPrediction) {
+      await selectPlacePrediction(firstPrediction);
+      return;
+    }
+
+    const keyword = query.trim();
+    if (!keyword) return;
+
+    try {
+      const prediction = (await getPlacePredictions(keyword))[0];
+      if (prediction) {
+        await selectPlacePrediction(prediction);
+      }
+    } catch (err) {
+      setPlacesError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   useEffect(() => {
     if (selectedCamera && !filteredCameras.some((camera) => camera.id === selectedCamera.id)) {
@@ -281,6 +409,7 @@ export default function App() {
         vehicleDetectors={filteredVehicleDetectors}
         selectedCamera={selectedCamera}
         selectedVehicleDetector={selectedVehicleDetector}
+        searchPlace={searchPlace}
         userLocation={userLocation}
         onSelectCamera={selectCamera}
         onSelectVehicleDetector={selectVehicleDetector}
@@ -297,20 +426,58 @@ export default function App() {
           </button>
         </div>
 
-        <label className="search-box">
-          <Search size={18} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜尋縣市、行政區、道路、攝影機"
-            type="search"
-          />
-          {query && (
-            <button className="clear-button" type="button" onClick={() => setQuery("")} title="清除搜尋">
-              <X size={16} />
-            </button>
+        <div className="search-block">
+          <label className="search-box">
+            <Search size={18} />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                if (searchPlace) setSearchPlace(undefined);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void submitSearch();
+                }
+              }}
+              placeholder="搜尋地點、商家、縣市、道路、攝影機"
+              type="search"
+            />
+            {query && (
+              <button className="clear-button" type="button" onClick={clearSearch} title="清除搜尋">
+                <X size={16} />
+              </button>
+            )}
+          </label>
+          {showSearchResults && (
+            <div className="search-results" aria-label="搜尋結果">
+              {localSearchMatches.map((match) => (
+                <button
+                  className="search-result-item"
+                  key={`${match.kind}:${match.id}`}
+                  onClick={() => (match.kind === "camera" ? selectCamera(match.item) : selectVehicleDetector(match.item))}
+                  type="button"
+                >
+                  <strong>{match.title}</strong>
+                  <small>{match.subtitle} · {match.kind === "camera" ? "即時影像" : "交通點位"}</small>
+                </button>
+              ))}
+              {placePredictions.map((prediction) => (
+                <button
+                  className="search-result-item place"
+                  key={prediction.place_id}
+                  onClick={() => void selectPlacePrediction(prediction)}
+                  type="button"
+                >
+                  <strong>{prediction.structured_formatting.main_text}</strong>
+                  <small>{prediction.structured_formatting.secondary_text || "Google 地點"}</small>
+                </button>
+              ))}
+              {placesError && <div className="search-result-note">{placesError}</div>}
+            </div>
           )}
-        </label>
+        </div>
 
         <SummaryStrip
           cameras={summary?.cameras.total ?? 0}
@@ -373,6 +540,7 @@ export default function App() {
             <span>國道 {formatNumber(summary?.cameras.byCategory.freeway ?? 0)}</span>
             <span>公路 {formatNumber(summary?.cameras.byCategory.highway ?? 0)}</span>
             <span>市區 {formatNumber(summary?.cameras.byCategory.city ?? 0)}</span>
+            <span>風景 {formatNumber(summary?.cameras.byCategory.scenic ?? 0)}</span>
           </div>
           {catalog?.sourceErrors.length ? (
             <div className={`source-health ${sourceHealth}`}>
@@ -400,6 +568,12 @@ export default function App() {
           <span>{loading ? "載入真實資料中" : `${shownItemCount.toLocaleString()} / ${totalFilteredCount.toLocaleString()} 個點位`}</span>
           {catalog?.updatedAt && <span>{formatRelativeTime(catalog.updatedAt)}</span>}
         </div>
+        {searchPlace && !shownItemCount && (
+          <div className="status-message warning">
+            <AlertCircle size={17} />
+            <span>已移到「{searchPlace.title}」，附近暫無攝影機。</span>
+          </div>
+        )}
 
         <div className="camera-list" aria-label="點位清單">
           {visibleLayers.cameras && visibleCameras.map((camera) => (
@@ -557,11 +731,78 @@ function MapLegend() {
         市區
       </span>
       <span>
+        <i className="legend-dot scenic" />
+        風景區
+      </span>
+      <span>
         <i className="legend-dot traffic" />
         VD
       </span>
     </div>
   );
+}
+
+async function getPlacePredictions(input: string): Promise<google.maps.places.AutocompletePrediction[]> {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return [];
+  }
+
+  await loadGooglePlaces();
+  const service = new google.maps.places.AutocompleteService();
+
+  return new Promise((resolve, reject) => {
+    service.getPlacePredictions(
+      {
+        componentRestrictions: { country: "tw" },
+        input,
+        language: "zh-TW"
+      },
+      (predictions, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+          resolve(predictions);
+          return;
+        }
+
+        if (status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+          resolve([]);
+          return;
+        }
+
+        reject(new Error(`Google Places search failed: ${status}`));
+      }
+    );
+  });
+}
+
+async function getPlaceDetails(placeId: string): Promise<SearchPlace> {
+  await loadGooglePlaces();
+  const host = document.createElement("div");
+  const service = new google.maps.places.PlacesService(host);
+
+  return new Promise((resolve, reject) => {
+    service.getDetails(
+      {
+        fields: ["formatted_address", "geometry", "name", "place_id"],
+        language: "zh-TW",
+        placeId
+      },
+      (place, status) => {
+        const location = place?.geometry?.location;
+        if (status === google.maps.places.PlacesServiceStatus.OK && place && location) {
+          resolve({
+            id: place.place_id || placeId,
+            title: place.name || place.formatted_address || "Google 地點",
+            address: place.formatted_address || "",
+            lat: location.lat(),
+            lon: location.lng()
+          });
+          return;
+        }
+
+        reject(new Error(`Google place details failed: ${status}`));
+      }
+    );
+  });
 }
 
 function loadFavorites(): Set<string> {
@@ -602,7 +843,8 @@ function categoryLabel(category: Camera["category"]) {
   return {
     freeway: "國道",
     highway: "省道/公路",
-    city: "市區"
+    city: "市區",
+    scenic: "風景區"
   }[category];
 }
 

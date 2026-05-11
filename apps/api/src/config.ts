@@ -24,7 +24,8 @@ export const config = {
   apiPort: Number(process.env.API_PORT || 8787),
   tdxClientId: process.env.TDX_CLIENT_ID || "",
   tdxClientSecret: process.env.TDX_CLIENT_SECRET || "",
-  tdxCityCodes: process.env.TDX_CITY_CODES || "Taipei",
+  tdxCityCodes: process.env.TDX_CITY_CODES || "all",
+  googleGeocodingApiKey: process.env.GOOGLE_GEOCODING_API_KEY || "",
   cwaApiKey: process.env.CWA_API_KEY || "",
   moenvApiKey: process.env.MOENV_API_KEY || "",
   wraApiKey: process.env.WRA_API_KEY || ""

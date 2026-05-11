@@ -1,4 +1,4 @@
-export type CameraCategory = "freeway" | "highway" | "city";
+export type CameraCategory = "freeway" | "highway" | "city" | "scenic";
 export type StreamType = "hls" | "mjpeg" | "snapshot" | "webpage" | "unknown";
 export type CameraStatus = "online" | "offline" | "unknown";
 export type SourceHealthStatus = "ok" | "partial" | "unavailable";
@@ -112,6 +112,14 @@ export interface EnvironmentSummary {
 }
 
 export interface UserLocation {
+  lat: number;
+  lon: number;
+}
+
+export interface SearchPlace {
+  id: string;
+  title: string;
+  address: string;
   lat: number;
   lon: number;
 }

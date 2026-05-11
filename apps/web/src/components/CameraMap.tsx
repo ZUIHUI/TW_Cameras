@@ -1,27 +1,25 @@
-import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { useEffect, useRef, useState } from "react";
-import type { Camera, VehicleDetector } from "../types";
+import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
+import type { Camera, SearchPlace, VehicleDetector } from "../types";
 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
 const USER_LOCATION_RADIUS_METERS = 500;
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() || "";
 
 const markerColors: Record<Camera["category"] | "traffic", string> = {
   freeway: "#0e6b52",
   highway: "#2b6fb0",
   city: "#b25d17",
+  scenic: "#0f9f9a",
   traffic: "#8b5cf6"
 };
-
-let configuredApiKey = "";
-let mapsLibraryPromise: Promise<google.maps.MapsLibrary> | undefined;
 
 interface CameraMapProps {
   cameras: Camera[];
   vehicleDetectors?: VehicleDetector[];
   selectedCamera?: Camera;
   selectedVehicleDetector?: VehicleDetector;
+  searchPlace?: SearchPlace;
   userLocation?: { lat: number; lon: number };
   onSelectCamera: (camera: Camera) => void;
   onSelectVehicleDetector?: (vd: VehicleDetector) => void;
@@ -32,6 +30,7 @@ export function CameraMap({
   vehicleDetectors = [],
   selectedCamera,
   selectedVehicleDetector,
+  searchPlace,
   userLocation,
   onSelectCamera,
   onSelectVehicleDetector
@@ -39,6 +38,7 @@ export function CameraMap({
   const mapElementRef = useRef<HTMLDivElement>(null);
   const clustererRef = useRef<MarkerClusterer | undefined>(undefined);
   const circleRef = useRef<google.maps.Circle | undefined>(undefined);
+  const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const onSelectCameraRef = useRef(onSelectCamera);
   const onSelectVehicleDetectorRef = useRef(onSelectVehicleDetector);
   const [map, setMap] = useState<google.maps.Map | undefined>();
@@ -53,7 +53,7 @@ export function CameraMap({
     }
 
     let cancelled = false;
-    loadGoogleMaps(GOOGLE_MAPS_API_KEY)
+    loadGoogleMaps()
       .then(({ Map }) => {
         if (cancelled || !mapElementRef.current) return;
 
@@ -175,10 +175,50 @@ export function CameraMap({
   useEffect(() => {
     if (!map) return;
 
+    searchMarkerRef.current?.setMap(null);
+    if (!searchPlace) {
+      return;
+    }
+
+    searchMarkerRef.current = new google.maps.Marker({
+      icon: {
+        fillColor: "#dc2626",
+        fillOpacity: 1,
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 9,
+        strokeColor: "#ffffff",
+        strokeWeight: 3
+      },
+      label: {
+        color: "#ffffff",
+        fontSize: "11px",
+        fontWeight: "800",
+        text: "P"
+      },
+      map,
+      position: { lat: searchPlace.lat, lng: searchPlace.lon },
+      title: searchPlace.title,
+      zIndex: google.maps.Marker.MAX_ZINDEX + 10
+    });
+
+    return () => {
+      searchMarkerRef.current?.setMap(null);
+    };
+  }, [map, searchPlace]);
+
+  useEffect(() => {
+    if (!map) return;
+
     const target = selectedCamera || selectedVehicleDetector;
     if (target) {
       map.panTo({ lat: target.lat, lng: target.lon });
       map.setZoom(Math.max(map.getZoom() || 12, 14));
+      return;
+    }
+
+    if (searchPlace) {
+      map.panTo({ lat: searchPlace.lat, lng: searchPlace.lon });
+      map.setZoom(Math.max(map.getZoom() || 12, 15));
       return;
     }
 
@@ -187,7 +227,7 @@ export function CameraMap({
       const bounds = circleBounds(center, USER_LOCATION_RADIUS_METERS);
       map.fitBounds(bounds, 24);
     }
-  }, [map, selectedCamera, selectedVehicleDetector, userLocation]);
+  }, [map, searchPlace, selectedCamera, selectedVehicleDetector, userLocation]);
 
   if (!GOOGLE_MAPS_API_KEY) {
     return (
@@ -208,22 +248,6 @@ export function CameraMap({
   }
 
   return <div ref={mapElementRef} className="map-canvas" aria-label="Google Maps 即時影像地圖" />;
-}
-
-function loadGoogleMaps(apiKey: string) {
-  if (configuredApiKey !== apiKey) {
-    setOptions({
-      key: apiKey,
-      language: "zh-TW",
-      region: "TW",
-      v: "weekly"
-    });
-    configuredApiKey = apiKey;
-    mapsLibraryPromise = undefined;
-  }
-
-  mapsLibraryPromise ||= importLibrary("maps");
-  return mapsLibraryPromise;
 }
 
 function createMapMarker({

@@ -6,10 +6,13 @@ import type { Camera, CameraCatalog, CameraCatalogSummary, CameraCategory, Sourc
 import { resolveTownFromCoordinate } from "./townResolver.js";
 
 const CAMERA_TTL_MS = 20 * 60 * 1000;
-const TDX_SCOPE_CONCURRENCY = 2;
-const TDX_SCOPE_GAP_MS = 400;
+const TDX_SCOPE_CONCURRENCY = 4;
+const TDX_SCOPE_GAP_MS = 120;
 const TDX_RETRY_DELAYS_MS = [1500];
-const DEFAULT_CITY_SCOPE_CODES = ["Taipei"];
+const DEFAULT_CITY_SCOPE_CODES = ["all"];
+const TOURISM_LIVE_CAMERA_URL = "https://www.taiwan.net.tw/m1.aspx?sNo=0042331";
+const TOURISM_SOURCE_NAME = "交通部觀光署即時影像";
+const TOURISM_GEOCODE_LIMIT = 20;
 
 const cityScopes = [
   ["Taipei", "臺北市"],
@@ -79,17 +82,26 @@ export async function getCameraCatalog() {
 }
 
 async function loadCameraCatalog(): Promise<CameraCatalog> {
-  const [cameraResult, vdResult] = await Promise.allSettled([
+  const [cameraResult, vdResult, scenicResult] = await Promise.allSettled([
     loadCameraCatalogData(),
-    loadVehicleDetectorCatalog()
+    loadVehicleDetectorCatalog(),
+    loadTourismScenicCatalog()
   ]);
 
-  const cameras = cameraResult.status === "fulfilled" ? cameraResult.value.cameras : [];
+  const trafficCameras = cameraResult.status === "fulfilled" ? cameraResult.value.cameras : [];
   const cameraErrors = cameraResult.status === "fulfilled" ? cameraResult.value.sourceErrors : [
     {
       source: "TDX 運輸資料流通服務",
       endpoint: "Road Traffic CCTV",
       message: cameraResult.reason instanceof Error ? cameraResult.reason.message : String(cameraResult.reason)
+    }
+  ];
+  const scenicCameras = scenicResult.status === "fulfilled" ? scenicResult.value.cameras : [];
+  const scenicErrors = scenicResult.status === "fulfilled" ? scenicResult.value.sourceErrors : [
+    {
+      source: TOURISM_SOURCE_NAME,
+      endpoint: TOURISM_LIVE_CAMERA_URL,
+      message: scenicResult.reason instanceof Error ? scenicResult.reason.message : String(scenicResult.reason)
     }
   ];
 
@@ -102,7 +114,8 @@ async function loadCameraCatalog(): Promise<CameraCatalog> {
     }
   ];
 
-  const sourceErrors = [...cameraErrors, ...vdErrors];
+  const cameras = [...trafficCameras, ...scenicCameras];
+  const sourceErrors = [...cameraErrors, ...scenicErrors, ...vdErrors];
 
   return {
     cameras,
@@ -117,7 +130,8 @@ function buildSummary(cameras: Camera[], vehicleDetectors: VehicleDetector[], so
   const byCategory: Record<CameraCategory, number> = {
     freeway: 0,
     highway: 0,
-    city: 0
+    city: 0,
+    scenic: 0
   };
   const byStreamType: Record<StreamType, number> = {
     hls: 0,
@@ -217,6 +231,68 @@ async function loadVehicleDetectorCatalog(): Promise<{ vehicleDetectors: Vehicle
   }
 }
 
+interface ScenicListItem {
+  uid: string;
+  title: string;
+  county: string;
+  source: string;
+  pageUrl: string;
+  status: "online" | "offline" | "unknown";
+}
+
+async function loadTourismScenicCatalog(): Promise<{ cameras: Camera[]; sourceErrors: SourceError[] }> {
+  try {
+    const html = await fetchText(TOURISM_LIVE_CAMERA_URL, {}, 6000);
+    const items = parseTourismItems(html);
+    const sourceErrors: SourceError[] = [];
+    let geocodedCount = 0;
+
+    const settled = await allSettledWithConcurrency(items, 3, async (item) => {
+      const coordinate = findScenicCoordinate(item.title, item.county);
+      const resolvedCoordinate =
+        coordinate || (geocodedCount++ < TOURISM_GEOCODE_LIMIT ? await geocodeScenicItem(item) : undefined);
+
+      if (!resolvedCoordinate) {
+        return undefined;
+      }
+
+      return normalizeScenicCamera(item, resolvedCoordinate);
+    });
+
+    const cameras = settled
+      .filter((result): result is PromiseFulfilledResult<Camera | undefined> => result.status === "fulfilled")
+      .map((result) => result.value)
+      .filter((camera): camera is Camera => Boolean(camera));
+    const failedCount = settled.filter((result) => result.status === "rejected").length;
+    const skippedCount = items.length - cameras.length - failedCount;
+
+    if (failedCount || skippedCount) {
+      sourceErrors.push({
+        source: TOURISM_SOURCE_NAME,
+        endpoint: TOURISM_LIVE_CAMERA_URL,
+        message: `${failedCount} scenic cameras failed and ${skippedCount} scenic cameras were skipped because coordinates were unavailable.`
+      });
+    }
+
+    return {
+      cameras,
+      sourceErrors
+    };
+  } catch (error) {
+    const cameras = buildCuratedScenicCameras();
+    return {
+      cameras,
+      sourceErrors: [
+        {
+          source: TOURISM_SOURCE_NAME,
+          endpoint: TOURISM_LIVE_CAMERA_URL,
+          message: `${error instanceof Error ? error.message : String(error)}; using curated scenic camera locations.`
+        }
+      ]
+    };
+  }
+}
+
 async function loadScope(scope: CameraScope): Promise<Camera[]> {
   const payload = await withTdxRetry(() => tdxGet<unknown>(scope.path, {}, { auth: "auto" }));
   const rows = pickArray(payload);
@@ -225,7 +301,7 @@ async function loadScope(scope: CameraScope): Promise<Camera[]> {
 
 function selectCityScopes(rawValue: string): CityScopeDefinition[] {
   const value = rawValue.trim();
-  if (value.toLowerCase() === "all") {
+  if (!value || value.toLowerCase() === "all") {
     return [...cityScopes];
   }
 
@@ -241,7 +317,209 @@ function selectCityScopes(rawValue: string): CityScopeDefinition[] {
   }
 
   const fallbackSet = new Set(DEFAULT_CITY_SCOPE_CODES.map((code) => code.toLowerCase()));
-  return cityScopes.filter(([cityCode]) => fallbackSet.has(cityCode.toLowerCase()));
+  return fallbackSet.has("all") ? [...cityScopes] : cityScopes.filter(([cityCode]) => fallbackSet.has(cityCode.toLowerCase()));
+}
+
+async function fetchText(url: string, init: RequestInit = {}, timeoutMs = 15000): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        "user-agent": "Mozilla/5.0 TaiwanLiveCameraPrototype/0.1",
+        ...(init.headers || {})
+      }
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new UpstreamError(`Upstream responded ${response.status}: ${body.slice(0, 240)}`, response.status);
+    }
+
+    return response.text();
+  } catch (error) {
+    if (error instanceof UpstreamError) {
+      throw error;
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new UpstreamError(`Upstream request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function parseTourismItems(html: string): ScenicListItem[] {
+  const items: ScenicListItem[] = [];
+  const blocks = html.match(/<li>\s*<div class="media-item">[\s\S]*?<\/li>/g) || [];
+
+  for (const block of blocks) {
+    const href = firstRegex(block, /<a\s+href="([^"]*uid=(\d+)[^"]*)"/);
+    const uid = firstRegex(block, /uid=(\d+)/);
+    const title = decodeHtml(firstRegex(block, /class="media-title">([\s\S]*?)<\/div>/));
+    const county = decodeHtml(firstRegex(block, /<small>([\s\S]*?)<\/small>/));
+    const source = decodeHtml(firstRegex(block, /即時影像提供來源：([\s\S]*?)(?:\r|\n|<a|<\/div>)/)) || TOURISM_SOURCE_NAME;
+
+    if (!href || !uid || !title || !county) {
+      continue;
+    }
+
+    items.push({
+      uid,
+      title,
+      county,
+      source,
+      pageUrl: new URL(href.replaceAll("&amp;", "&"), TOURISM_LIVE_CAMERA_URL).toString(),
+      status: block.includes("is-online") ? "online" : block.includes("is-offline") ? "offline" : "unknown"
+    });
+  }
+
+  return dedupeScenicItems(items);
+}
+
+function normalizeScenicCamera(item: ScenicListItem, coordinate: { lat: number; lon: number }): Camera | undefined {
+  if (!isTaiwanCoordinate(coordinate.lat, coordinate.lon)) {
+    return undefined;
+  }
+
+  return {
+    id: `scenic:${item.uid}`,
+    source: item.source || TOURISM_SOURCE_NAME,
+    sourceCameraId: item.uid,
+    title: item.title,
+    category: "scenic",
+    county: item.county,
+    town: "",
+    roadName: "風景區",
+    lat: coordinate.lat,
+    lon: coordinate.lon,
+    streamUrl: item.pageUrl,
+    streamType: "webpage",
+    sourcePageUrl: item.pageUrl,
+    attribution: TOURISM_SOURCE_NAME,
+    status: item.status,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function geocodeScenicItem(item: ScenicListItem): Promise<{ lat: number; lon: number } | undefined> {
+  if (!config.googleGeocodingApiKey) {
+    return undefined;
+  }
+
+  const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  url.searchParams.set("address", `${item.title} ${item.county} 台灣`);
+  url.searchParams.set("region", "tw");
+  url.searchParams.set("language", "zh-TW");
+  url.searchParams.set("key", config.googleGeocodingApiKey);
+
+  const payload = await fetchJsonLike(url.toString());
+  const first = payload.results?.[0];
+  const location = first?.geometry?.location;
+  if (typeof location?.lat !== "number" || typeof location?.lng !== "number") {
+    return undefined;
+  }
+
+  return { lat: location.lat, lon: location.lng };
+}
+
+async function fetchJsonLike(url: string): Promise<{ results?: Array<{ geometry?: { location?: { lat?: number; lng?: number } } }> }> {
+  const text = await fetchText(url, {}, 12000);
+  return JSON.parse(text) as { results?: Array<{ geometry?: { location?: { lat?: number; lng?: number } } }> };
+}
+
+const scenicCoordinates: Array<{ keywords: string[]; lat: number; lon: number }> = [
+  { keywords: ["大佳河濱公園"], lat: 25.0738, lon: 121.5386 },
+  { keywords: ["碧山巖"], lat: 25.0984, lon: 121.5859 },
+  { keywords: ["劍潭山"], lat: 25.0836, lon: 121.5271 },
+  { keywords: ["淡水漁人碼頭"], lat: 25.1837, lon: 121.4105 },
+  { keywords: ["八里左岸"], lat: 25.1589, lon: 121.4352 },
+  { keywords: ["野柳"], lat: 25.207, lon: 121.6909 },
+  { keywords: ["十分瀑布"], lat: 25.0495, lon: 121.7871 },
+  { keywords: ["龜山島"], lat: 24.8419, lon: 121.9517 },
+  { keywords: ["太平山"], lat: 24.4968, lon: 121.5253 },
+  { keywords: ["武陵農場"], lat: 24.3837, lon: 121.3097 },
+  { keywords: ["高美濕地"], lat: 24.3104, lon: 120.5497 },
+  { keywords: ["梨山"], lat: 24.2548, lon: 121.2524 },
+  { keywords: ["合歡山"], lat: 24.142, lon: 121.2727 },
+  { keywords: ["清境"], lat: 24.0443, lon: 121.1566 },
+  { keywords: ["日月潭"], lat: 23.8659, lon: 120.9155 },
+  { keywords: ["阿里山"], lat: 23.5087, lon: 120.805 },
+  { keywords: ["東石漁人碼頭"], lat: 23.4526, lon: 120.136 },
+  { keywords: ["七股鹽山"], lat: 23.154, lon: 120.1011 },
+  { keywords: ["北門"], lat: 23.2677, lon: 120.1245 },
+  { keywords: ["曾文水庫"], lat: 23.2435, lon: 120.5411 },
+  { keywords: ["墾丁"], lat: 21.9461, lon: 120.7997 },
+  { keywords: ["鵝鑾鼻"], lat: 21.9029, lon: 120.8521 },
+  { keywords: ["小琉球", "琉球"], lat: 22.3381, lon: 120.3692 },
+  { keywords: ["清水斷崖"], lat: 24.2183, lon: 121.6899 },
+  { keywords: ["太魯閣"], lat: 24.1587, lon: 121.621 },
+  { keywords: ["石梯坪"], lat: 23.4823, lon: 121.5103 },
+  { keywords: ["三仙台"], lat: 23.1255, lon: 121.4173 },
+  { keywords: ["蘭嶼"], lat: 22.0379, lon: 121.5508 },
+  { keywords: ["雙心石滬"], lat: 23.2196, lon: 119.5196 },
+  { keywords: ["金門", "莒光樓"], lat: 24.4327, lon: 118.3171 },
+  { keywords: ["北竿", "芹壁"], lat: 26.2242, lon: 119.9967 }
+];
+
+function buildCuratedScenicCameras(): Camera[] {
+  return scenicCoordinates.map((entry, index) => {
+    const title = entry.keywords[0];
+    return {
+      id: `scenic:curated:${index}`,
+      source: TOURISM_SOURCE_NAME,
+      sourceCameraId: `curated:${index}`,
+      title,
+      category: "scenic",
+      county: "台灣",
+      town: "",
+      roadName: "風景區",
+      lat: entry.lat,
+      lon: entry.lon,
+      streamUrl: TOURISM_LIVE_CAMERA_URL,
+      streamType: "webpage",
+      sourcePageUrl: TOURISM_LIVE_CAMERA_URL,
+      attribution: TOURISM_SOURCE_NAME,
+      status: "unknown",
+      updatedAt: new Date().toISOString()
+    };
+  });
+}
+
+function findScenicCoordinate(title: string, county: string): { lat: number; lon: number } | undefined {
+  const text = `${title} ${county}`;
+  const match = scenicCoordinates.find((entry) => entry.keywords.some((keyword) => text.includes(keyword)));
+  return match ? { lat: match.lat, lon: match.lon } : undefined;
+}
+
+function dedupeScenicItems(items: ScenicListItem[]): ScenicListItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = item.uid || `${item.county}:${item.title}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function firstRegex(value: string, regex: RegExp): string {
+  return value.match(regex)?.[1]?.trim() || "";
+}
+
+function decodeHtml(value: string): string {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function allSettledWithConcurrency<T, R>(

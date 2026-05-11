@@ -1,4 +1,4 @@
-export type CameraCategory = "freeway" | "highway" | "city";
+export type CameraCategory = "freeway" | "highway" | "city" | "scenic";
 
 export type StreamType = "hls" | "mjpeg" | "snapshot" | "webpage" | "unknown";
 

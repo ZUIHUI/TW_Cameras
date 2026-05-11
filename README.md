@@ -16,9 +16,10 @@ Copy `.env.example` to `.env.local` and fill the keys you already have:
 ```env
 TDX_CLIENT_ID=
 TDX_CLIENT_SECRET=
-TDX_CITY_CODES=Taipei
+TDX_CITY_CODES=all
 CWA_API_KEY=your-cwa-api-key
 MOENV_API_KEY=your-moenv-api-key
+GOOGLE_GEOCODING_API_KEY=your-server-side-google-geocoding-api-key
 API_PORT=8787
 VITE_API_BASE_URL=/api
 VITE_GOOGLE_MAPS_API_KEY=your-google-maps-api-key
@@ -68,11 +69,14 @@ MOENV_API_KEY
 TDX_CLIENT_ID
 TDX_CLIENT_SECRET
 TDX_CITY_CODES
+GOOGLE_GEOCODING_API_KEY
 VITE_GOOGLE_MAPS_API_KEY
 ```
 
 `TDX_CLIENT_ID` and `TDX_CLIENT_SECRET` can stay empty while waiting for TDX approval. The API will try TDX public reads for CCTV/VD metadata; when credentials are present, it uses the OAuth token first and falls back to public reads if the token is rate-limited.
 
-`TDX_CITY_CODES` defaults to `Taipei` so the first Vercel load does not call every city CCTV endpoint and hit TDX rate limits. Set it to `all` or a comma-separated list like `Taipei,NewTaipei,Taichung` after the TDX quota is stable.
+`TDX_CITY_CODES` defaults to `all` so the city CCTV catalog covers Taiwan. Set a comma-separated list like `Taipei,NewTaipei,Taichung` only when you want to limit TDX requests during development.
 
-`VITE_GOOGLE_MAPS_API_KEY` is a browser key for the map. Keep the real value in `.env.local` and Vercel Environment Variables, and restrict it in Google Cloud Console to Maps JavaScript API plus your Vercel domain and localhost development URLs.
+`VITE_GOOGLE_MAPS_API_KEY` is a browser key for the map and Places search. Keep the real value in `.env.local` and Vercel Environment Variables, and restrict it in Google Cloud Console to Maps JavaScript API, Places API, your Vercel domain, and localhost development URLs.
+
+`GOOGLE_GEOCODING_API_KEY` is server-side only. It is used to add coordinates to scenic live cameras when the tourism source page does not expose coordinates. Restrict it to Geocoding API usage in Google Cloud.

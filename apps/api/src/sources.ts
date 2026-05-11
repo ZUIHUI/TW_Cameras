@@ -32,5 +32,13 @@ export const sources: SourceInfo[] = [
     licenseUrl: "https://data.gov.tw/license",
     cadence: "約 10 至 60 分鐘",
     notes: "即時原始資料可能未經完整檢核，原型會在 UI 顯示提醒。"
+  },
+  {
+    id: "tourism-livecam",
+    name: "交通部觀光署即時影像",
+    url: "https://www.taiwan.net.tw/m1.aspx?sNo=0042331",
+    licenseUrl: "https://data.gov.tw/license",
+    cadence: "依觀光署公開頁面更新",
+    notes: "解析官方即時影像頁面作為風景區攝影機來源；座標缺漏時可用 Google Geocoding 補足。"
   }
 ];

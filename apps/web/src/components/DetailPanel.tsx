@@ -263,7 +263,8 @@ function categoryLabel(category: Camera["category"]) {
   return {
     freeway: "國道",
     highway: "省道/公路",
-    city: "市區"
+    city: "市區",
+    scenic: "風景區"
   }[category];
 }
 
