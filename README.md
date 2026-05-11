@@ -52,11 +52,11 @@ Vercel settings:
 Root Directory: ./
 Framework Preset: Vite
 Install Command: pnpm install --frozen-lockfile
-Build Command: pnpm run build:vercel
+Build Command: pnpm -w run build:vercel
 Output Directory: dist
 ```
 
-The root `vite.config.ts` reads `apps/web` as the Vite app root and writes the static build directly to root `dist`.
+The root `vite.config.ts` reads `apps/web` as the Vite app root and writes the static build directly to root `dist`. The `-w` flag forces pnpm to run the build from the workspace root even if Vercel starts the command inside a workspace package.
 
 Environment Variables:
 

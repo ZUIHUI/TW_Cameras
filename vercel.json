@@ -2,6 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm run build:vercel",
+  "buildCommand": "pnpm -w run build:vercel",
   "outputDirectory": "dist"
 }
