@@ -23,6 +23,30 @@ export interface Camera {
   updatedAt: string;
 }
 
+export interface VehicleDetector {
+  id: string;
+  source: string;
+  vdId: string;
+  title: string;
+  roadName: string;
+  roadSection: {
+    start: string;
+    end: string;
+  };
+  lat: number;
+  lon: number;
+  biDirectional: number;
+  detectionLinks: Array<{
+    linkId: string;
+    bearing: string;
+    roadDirection: string;
+    laneNum: number;
+    actualLaneNum: number;
+  }>;
+  attribution: string;
+  updatedAt: string;
+}
+
 export interface SourceError {
   source: string;
   endpoint: string;
@@ -31,6 +55,7 @@ export interface SourceError {
 
 export interface CameraCatalog {
   cameras: Camera[];
+  vehicleDetectors: VehicleDetector[];
   sourceErrors: SourceError[];
   updatedAt: string;
 }

@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getCameras, getEnvironment } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
-import type { Camera, CameraCatalogResponse, CategoryFilter, EnvironmentSummary, UserLocation } from "./types";
+import type { Camera, CameraCatalogResponse, CategoryFilter, EnvironmentSummary, UserLocation, VehicleDetector } from "./types";
 
 const categoryOptions: Array<{ id: CategoryFilter; label: string }> = [
   { id: "all", label: "全部" },
@@ -21,6 +21,7 @@ const categoryOptions: Array<{ id: CategoryFilter; label: string }> = [
   { id: "freeway", label: "國道" },
   { id: "highway", label: "省道/公路" },
   { id: "city", label: "市區" },
+  { id: "traffic", label: "交通流量" },
   { id: "favorites", label: "收藏" }
 ];
 
@@ -29,6 +30,7 @@ const favoriteStorageKey = "taiwan-live-cam:favorites";
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
   const [selectedCamera, setSelectedCamera] = useState<Camera | undefined>();
+  const [selectedVehicleDetector, setSelectedVehicleDetector] = useState<VehicleDetector | undefined>();
   const [environment, setEnvironment] = useState<EnvironmentSummary | undefined>();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
@@ -130,6 +132,11 @@ export default function App() {
   }
 
   const filteredCameras = useMemo(() => {
+    // In traffic mode, don't show cameras
+    if (category === "traffic") {
+      return [];
+    }
+
     const allCameras = catalog?.cameras ?? [];
     const normalizedQuery = normalize(query);
 
@@ -158,6 +165,14 @@ export default function App() {
   }, [catalog?.cameras, category, favorites, query, userLocation]);
 
   useEffect(() => {
+    if (category === "traffic") {
+      const vehicleDetectors = catalog?.vehicleDetectors ?? [];
+      if (vehicleDetectors.length && (!selectedVehicleDetector || !vehicleDetectors.some((vd) => vd.id === selectedVehicleDetector.id))) {
+        setSelectedVehicleDetector(vehicleDetectors[0]);
+      }
+      return;
+    }
+
     if (!filteredCameras.length) {
       return;
     }
@@ -165,7 +180,7 @@ export default function App() {
     if (!selectedCamera || !filteredCameras.some((camera) => camera.id === selectedCamera.id)) {
       setSelectedCamera(filteredCameras[0]);
     }
-  }, [filteredCameras, selectedCamera]);
+  }, [filteredCameras, selectedCamera, category, catalog?.vehicleDetectors, selectedVehicleDetector]);
 
   const favoriteCount = favorites.size;
   const selectedIsFavorite = selectedCamera ? favorites.has(selectedCamera.id) : false;
@@ -173,7 +188,15 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <CameraMap cameras={filteredCameras} selectedCamera={selectedCamera} onSelectCamera={setSelectedCamera} />
+      <CameraMap 
+        cameras={filteredCameras} 
+        vehicleDetectors={category === "traffic" ? catalog?.vehicleDetectors : []}
+        selectedCamera={selectedCamera} 
+        selectedVehicleDetector={selectedVehicleDetector}
+        userLocation={userLocation}
+        onSelectCamera={setSelectedCamera}
+        onSelectVehicleDetector={setSelectedVehicleDetector}
+      />
 
       <aside className="control-panel" aria-label="攝影機搜尋與列表">
         <div className="brand-row">
@@ -284,14 +307,18 @@ export default function App() {
         </div>
       </aside>
 
-      {selectedCamera && (
+      {(selectedCamera || selectedVehicleDetector) && (
         <DetailPanel
           camera={selectedCamera}
-          environment={environment}
-          environmentError={environmentError}
-          isFavorite={selectedIsFavorite}
-          onClose={() => setSelectedCamera(undefined)}
-          onToggleFavorite={() => toggleFavorite(selectedCamera.id)}
+          vehicleDetector={selectedVehicleDetector}
+          environment={selectedCamera ? environment : undefined}
+          environmentError={selectedCamera ? environmentError : ""}
+          isFavorite={selectedCamera ? selectedIsFavorite : false}
+          onClose={() => {
+            setSelectedCamera(undefined);
+            setSelectedVehicleDetector(undefined);
+          }}
+          onToggleFavorite={() => selectedCamera && toggleFavorite(selectedCamera.id)}
         />
       )}
 

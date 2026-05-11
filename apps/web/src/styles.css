@@ -289,6 +289,12 @@ h3 {
   background: #b25d17;
 }
 
+.camera-dot.traffic,
+.badge.traffic,
+.marker-pin.traffic span {
+  background: #8b5cf6;
+}
+
 .camera-copy {
   min-width: 0;
 }

@@ -1,8 +1,9 @@
 import { AlertCircle, ExternalLink, Heart, ShieldCheck, Video, X } from "lucide-react";
-import type { Camera, EnvironmentSummary } from "../types";
+import type { Camera, EnvironmentSummary, VehicleDetector } from "../types";
 
 interface DetailPanelProps {
-  camera: Camera;
+  camera?: Camera;
+  vehicleDetector?: VehicleDetector;
   environment?: EnvironmentSummary;
   environmentError: string;
   isFavorite: boolean;
@@ -12,62 +13,87 @@ interface DetailPanelProps {
 
 export function DetailPanel({
   camera,
+  vehicleDetector,
   environment,
   environmentError,
   isFavorite,
   onClose,
   onToggleFavorite
 }: DetailPanelProps) {
+  const item = camera || vehicleDetector;
+  if (!item) return null;
+
   return (
-    <section className="detail-panel" aria-label="攝影機詳情">
+    <section className="detail-panel" aria-label="詳情">
       <div className="detail-header">
         <div>
-          <span className={`badge ${camera.category}`}>{categoryLabel(camera.category)}</span>
-          <h2>{camera.title}</h2>
+          <span className={`badge ${camera ? camera.category : 'traffic'}`}>{itemLabel(item)}</span>
+          <h2>{item.title}</h2>
           <p>
-            {camera.county || "未標示縣市"} {camera.town} · {camera.source}
+            {item.source}
           </p>
         </div>
         <div className="detail-actions">
-          <button className="icon-button" type="button" onClick={onToggleFavorite} title="切換收藏">
-            <Heart size={19} fill={isFavorite ? "currentColor" : "none"} />
-          </button>
+          {camera && (
+            <button className="icon-button" type="button" onClick={onToggleFavorite} title="切換收藏">
+              <Heart size={19} fill={isFavorite ? "currentColor" : "none"} />
+            </button>
+          )}
           <button className="icon-button" type="button" onClick={onClose} title="關閉詳情">
             <X size={19} />
           </button>
         </div>
       </div>
 
-      <StreamPreview camera={camera} />
+      {camera && <StreamPreview camera={camera} />}
+      {vehicleDetector && <VehicleDetectorInfo vd={vehicleDetector} />}
 
       <div className="fact-grid">
         <div>
           <span>座標</span>
           <strong>
-            {camera.lat.toFixed(5)}, {camera.lon.toFixed(5)}
+            {item.lat.toFixed(5)}, {item.lon.toFixed(5)}
           </strong>
         </div>
-        <div>
-          <span>串流</span>
-          <strong>{camera.streamType.toUpperCase()}</strong>
-        </div>
-        <div>
-          <span>最後更新</span>
-          <strong>{formatDate(camera.updatedAt)}</strong>
-        </div>
-        <div>
-          <span>來源</span>
-          <strong>{camera.attribution}</strong>
-        </div>
+        {camera && (
+          <>
+            <div>
+              <span>串流</span>
+              <strong>{camera.streamType.toUpperCase()}</strong>
+            </div>
+            <div>
+              <span>最後更新</span>
+              <strong>{formatDate(camera.updatedAt)}</strong>
+            </div>
+            <div>
+              <span>來源</span>
+              <strong>{camera.attribution}</strong>
+            </div>
+          </>
+        )}
+        {vehicleDetector && (
+          <>
+            <div>
+              <span>最後更新</span>
+              <strong>{formatDate(vehicleDetector.updatedAt)}</strong>
+            </div>
+            <div>
+              <span>來源</span>
+              <strong>{vehicleDetector.attribution}</strong>
+            </div>
+          </>
+        )}
       </div>
 
-      <EnvironmentBlock environment={environment} error={environmentError} />
+      {camera && <EnvironmentBlock environment={environment} error={environmentError} />}
 
       <div className="detail-footer">
-        <a href={camera.sourcePageUrl || camera.streamUrl} rel="noreferrer" target="_blank">
-          <ExternalLink size={16} />
-          開啟來源
-        </a>
+        {camera && (
+          <a href={camera.sourcePageUrl || camera.streamUrl} rel="noreferrer" target="_blank">
+            <ExternalLink size={16} />
+            開啟來源
+          </a>
+        )}
         <span>
           <ShieldCheck size={15} />
           不轉存、不錄製影像
@@ -170,6 +196,40 @@ function temperatureText(environment: EnvironmentSummary) {
       : "";
   const rain = weather.rainProbability !== undefined ? `降雨 ${weather.rainProbability}%` : "";
   return [range, rain].filter(Boolean).join(" · ");
+}
+
+function VehicleDetectorInfo({ vd }: { vd: VehicleDetector }) {
+  return (
+    <div className="vd-info">
+      <h3>交通偵測器資訊</h3>
+      <div className="vd-details">
+        <div>
+          <span>道路</span>
+          <strong>{vd.roadName}</strong>
+        </div>
+        <div>
+          <span>路段</span>
+          <strong>{vd.roadSection.start} - {vd.roadSection.end}</strong>
+        </div>
+        <div>
+          <span>車道數</span>
+          <strong>{vd.detectionLinks.length} 個偵測區段</strong>
+        </div>
+        <div>
+          <span>雙向</span>
+          <strong>{vd.biDirectional ? '是' : '否'}</strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function itemLabel(item: Camera | VehicleDetector): string {
+  if ('category' in item) {
+    return categoryLabel(item.category);
+  } else {
+    return '交通流量';
+  }
 }
 
 function categoryLabel(category: Camera["category"]) {

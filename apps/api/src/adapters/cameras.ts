@@ -1,7 +1,7 @@
 import { timedCache } from "../cache.js";
 import { missingEnv } from "../config.js";
 import { tdxGet } from "../tdx.js";
-import type { Camera, CameraCatalog, CameraCategory, SourceError, StreamType } from "../types.js";
+import type { Camera, CameraCatalog, CameraCategory, SourceError, StreamType, VehicleDetector } from "../types.js";
 
 const CAMERA_TTL_MS = 20 * 60 * 1000;
 
@@ -72,10 +72,11 @@ async function loadCameraCatalog(): Promise<CameraCatalog> {
   if (missingEnv(["tdxClientId", "tdxClientSecret"]).length) {
     return {
       cameras: [],
+      vehicleDetectors: [],
       sourceErrors: [
         {
           source: "TDX 運輸資料流通服務",
-          endpoint: "TDX OAuth / Road Traffic CCTV",
+          endpoint: "TDX OAuth / Road Traffic CCTV & VD",
           message: "TDX_CLIENT_ID and TDX_CLIENT_SECRET are not set yet."
         }
       ],
@@ -83,13 +84,45 @@ async function loadCameraCatalog(): Promise<CameraCatalog> {
     };
   }
 
+  const [cameraResult, vdResult] = await Promise.allSettled([
+    loadCameraCatalogData(),
+    loadVehicleDetectorCatalog()
+  ]);
+
+  const cameras = cameraResult.status === "fulfilled" ? cameraResult.value.cameras : [];
+  const cameraErrors = cameraResult.status === "fulfilled" ? cameraResult.value.sourceErrors : [
+    {
+      source: "TDX 運輸資料流通服務",
+      endpoint: "Road Traffic CCTV",
+      message: cameraResult.reason instanceof Error ? cameraResult.reason.message : String(cameraResult.reason)
+    }
+  ];
+
+  const vehicleDetectors = vdResult.status === "fulfilled" ? vdResult.value.vehicleDetectors : [];
+  const vdErrors = vdResult.status === "fulfilled" ? vdResult.value.sourceErrors : [
+    {
+      source: "TDX 運輸資料流通服務",
+      endpoint: "Road Traffic VD",
+      message: vdResult.reason instanceof Error ? vdResult.reason.message : String(vdResult.reason)
+    }
+  ];
+
+  return {
+    cameras,
+    vehicleDetectors,
+    sourceErrors: [...cameraErrors, ...vdErrors],
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function loadCameraCatalogData(): Promise<{ cameras: Camera[]; sourceErrors: SourceError[] }> {
   const settled = await Promise.allSettled(scopes.map(loadScope));
   const cameras: Camera[] = [];
   const sourceErrors: SourceError[] = [];
 
   settled.forEach((result, index) => {
     if (result.status === "fulfilled") {
-      cameras.push(...result.value);
+      cameras.push(...(result.value as Camera[]));
     } else {
       sourceErrors.push({
         source: scopes[index].source,
@@ -106,9 +139,37 @@ async function loadCameraCatalog(): Promise<CameraCatalog> {
 
   return {
     cameras: deduped,
-    sourceErrors,
-    updatedAt: new Date().toISOString()
+    sourceErrors
   };
+}
+
+async function loadVehicleDetectorCatalog(): Promise<{ vehicleDetectors: VehicleDetector[]; sourceErrors: SourceError[] }> {
+  try {
+    const payload = await tdxGet<unknown>("/Road/Traffic/VD/Freeway");
+    const vdData = payload as { VDs: unknown[] };
+    const rows = vdData.VDs || [];
+    
+    const vehicleDetectors = rows
+      .map((row) => normalizeVehicleDetector(row))
+      .filter((vd): vd is VehicleDetector => Boolean(vd))
+      .sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
+
+    return {
+      vehicleDetectors,
+      sourceErrors: []
+    };
+  } catch (error) {
+    return {
+      vehicleDetectors: [],
+      sourceErrors: [
+        {
+          source: "TDX 運輸資料流通服務",
+          endpoint: "/Road/Traffic/VD/Freeway",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      ]
+    };
+  }
 }
 
 async function loadScope(scope: CameraScope): Promise<Camera[]> {
@@ -154,6 +215,56 @@ function normalizeCamera(row: unknown, scope: CameraScope): Camera | undefined {
     sourcePageUrl: streamUrl,
     attribution: scope.attribution,
     status: "unknown",
+    updatedAt
+  };
+}
+
+function normalizeVehicleDetector(row: unknown): VehicleDetector | undefined {
+  if (!isRecord(row)) {
+    return undefined;
+  }
+
+  const vdId = firstString(row, ["VDID", "VDId", "ID", "id"]);
+  const lat = firstNumber(row, ["PositionLat", "Latitude", "Lat", "lat"]);
+  const lon = firstNumber(row, ["PositionLon", "Longitude", "Lon", "lng", "lon"]);
+
+  if (!vdId || lat === undefined || lon === undefined || !isTaiwanCoordinate(lat, lon)) {
+    return undefined;
+  }
+
+  const roadName = firstString(row, ["RoadName", "Road", "RouteName"]) || "";
+  const roadSection = row.RoadSection;
+  const biDirectional = typeof row.BiDirectional === "number" ? row.BiDirectional : 0;
+  const detectionLinks = Array.isArray(row.DetectionLinks) ? row.DetectionLinks : [];
+  const updatedAt = firstString(row, ["UpdateTime", "UpdatedTime", "DataCollectTime", "SrcUpdateTime"]) || new Date().toISOString();
+
+  const normalizedDetectionLinks = detectionLinks
+    .filter((link): link is Record<string, unknown> => isRecord(link))
+    .map((link) => ({
+      linkId: firstString(link, ["LinkID", "LinkId", "ID", "id"]) || "",
+      bearing: firstString(link, ["Bearing", "Direction"]) || "",
+      roadDirection: firstString(link, ["RoadDirection", "Direction"]) || "",
+      laneNum: typeof link.LaneNum === "number" ? link.LaneNum : 0,
+      actualLaneNum: typeof link.ActualLaneNum === "number" ? link.ActualLaneNum : 0
+    }));
+
+  const roadSectionNormalized = isRecord(roadSection) ? {
+    start: firstString(roadSection, ["Start"]) || "",
+    end: firstString(roadSection, ["End"]) || ""
+  } : { start: "", end: "" };
+
+  return {
+    id: `vd:${vdId}`,
+    source: "TDX 運輸資料流通服務",
+    vdId,
+    title: `${roadName} ${roadSectionNormalized.start} - ${roadSectionNormalized.end}`.trim() || vdId,
+    roadName,
+    roadSection: roadSectionNormalized,
+    lat,
+    lon,
+    biDirectional,
+    detectionLinks: normalizedDetectionLinks,
+    attribution: "TDX 運輸資料流通服務 / 交通部高速公路局",
     updatedAt
   };
 }

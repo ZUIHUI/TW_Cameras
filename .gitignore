@@ -10,3 +10,4 @@ Thumbs.db
 apps/web/dist/
 apps/api/dist/
 .vercel
+.env*.local
