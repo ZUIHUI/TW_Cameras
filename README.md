@@ -16,6 +16,7 @@ Copy `.env.example` to `.env.local` and fill the keys you already have:
 ```env
 TDX_CLIENT_ID=
 TDX_CLIENT_SECRET=
+TDX_CITY_CODES=Taipei
 CWA_API_KEY=your-cwa-api-key
 MOENV_API_KEY=your-moenv-api-key
 API_PORT=8787
@@ -65,6 +66,9 @@ CWA_API_KEY
 MOENV_API_KEY
 TDX_CLIENT_ID
 TDX_CLIENT_SECRET
+TDX_CITY_CODES
 ```
 
-`TDX_CLIENT_ID` and `TDX_CLIENT_SECRET` can stay empty while waiting for TDX approval. In that state `/api/cameras` returns an empty list with a source warning instead of failing the deployment.
+`TDX_CLIENT_ID` and `TDX_CLIENT_SECRET` can stay empty while waiting for TDX approval. The API will try TDX public reads for CCTV/VD metadata; when credentials are present, it uses the OAuth token first and falls back to public reads if the token is rate-limited.
+
+`TDX_CITY_CODES` defaults to `Taipei` so the first Vercel load does not call every city CCTV endpoint and hit TDX rate limits. Set it to `all` or a comma-separated list like `Taipei,NewTaipei,Taichung` after the TDX quota is stable.

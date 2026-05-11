@@ -1,5 +1,5 @@
 import { timedCache } from "../cache.js";
-import { missingEnv } from "../config.js";
+import { config } from "../config.js";
 import { UpstreamError } from "../http.js";
 import { tdxGet } from "../tdx.js";
 import type { Camera, CameraCatalog, CameraCatalogSummary, CameraCategory, SourceError, StreamType, VehicleDetector } from "../types.js";
@@ -9,6 +9,7 @@ const CAMERA_TTL_MS = 20 * 60 * 1000;
 const TDX_SCOPE_CONCURRENCY = 2;
 const TDX_SCOPE_GAP_MS = 400;
 const TDX_RETRY_DELAYS_MS = [1500];
+const DEFAULT_CITY_SCOPE_CODES = ["Taipei"];
 
 const cityScopes = [
   ["Taipei", "臺北市"],
@@ -35,6 +36,8 @@ const cityScopes = [
   ["LienchiangCounty", "連江縣"]
 ] as const;
 
+type CityScopeDefinition = (typeof cityScopes)[number];
+
 interface CameraScope {
   path: string;
   category: CameraCategory;
@@ -42,6 +45,8 @@ interface CameraScope {
   county: string;
   attribution: string;
 }
+
+const selectedCityScopes = selectCityScopes(config.tdxCityCodes);
 
 const scopes: CameraScope[] = [
   {
@@ -58,7 +63,7 @@ const scopes: CameraScope[] = [
     county: "",
     attribution: "TDX 運輸資料流通服務 / 交通部公路局"
   },
-  ...cityScopes.map(
+  ...selectedCityScopes.map(
     ([cityCode, countyName]): CameraScope => ({
       path: `/Road/Traffic/CCTV/City/${cityCode}`,
       category: "city",
@@ -74,24 +79,6 @@ export async function getCameraCatalog() {
 }
 
 async function loadCameraCatalog(): Promise<CameraCatalog> {
-  if (missingEnv(["tdxClientId", "tdxClientSecret"]).length) {
-    const sourceErrors = [
-      {
-        source: "TDX 運輸資料流通服務",
-        endpoint: "TDX OAuth / Road Traffic CCTV & VD",
-        message: "TDX_CLIENT_ID and TDX_CLIENT_SECRET are not set yet."
-      }
-    ];
-
-    return {
-      cameras: [],
-      vehicleDetectors: [],
-      sourceErrors,
-      summary: buildSummary([], [], sourceErrors),
-      updatedAt: new Date().toISOString()
-    };
-  }
-
   const [cameraResult, vdResult] = await Promise.allSettled([
     loadCameraCatalogData(),
     loadVehicleDetectorCatalog()
@@ -187,8 +174,12 @@ async function loadCameraCatalogData(): Promise<{ cameras: Camera[]; sourceError
   });
 
   const deduped = dedupeCameras(cameras).sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
-  if (!deduped.length) {
-    throw new Error("No CCTV records could be loaded from TDX.");
+  if (!deduped.length && !sourceErrors.length) {
+    sourceErrors.push({
+      source: "TDX",
+      endpoint: "Road Traffic CCTV",
+      message: "No CCTV records could be loaded from TDX."
+    });
   }
 
   return {
@@ -199,7 +190,7 @@ async function loadCameraCatalogData(): Promise<{ cameras: Camera[]; sourceError
 
 async function loadVehicleDetectorCatalog(): Promise<{ vehicleDetectors: VehicleDetector[]; sourceErrors: SourceError[] }> {
   try {
-    const payload = await withTdxRetry(() => tdxGet<unknown>("/Road/Traffic/VD/Freeway"));
+    const payload = await withTdxRetry(() => tdxGet<unknown>("/Road/Traffic/VD/Freeway", {}, { auth: "auto" }));
     const vdData = payload as { VDs: unknown[] };
     const rows = vdData.VDs || [];
     
@@ -227,9 +218,30 @@ async function loadVehicleDetectorCatalog(): Promise<{ vehicleDetectors: Vehicle
 }
 
 async function loadScope(scope: CameraScope): Promise<Camera[]> {
-  const payload = await withTdxRetry(() => tdxGet<unknown>(scope.path));
+  const payload = await withTdxRetry(() => tdxGet<unknown>(scope.path, {}, { auth: "auto" }));
   const rows = pickArray(payload);
   return rows.map((row) => normalizeCamera(row, scope)).filter((camera): camera is Camera => Boolean(camera));
+}
+
+function selectCityScopes(rawValue: string): CityScopeDefinition[] {
+  const value = rawValue.trim();
+  if (value.toLowerCase() === "all") {
+    return [...cityScopes];
+  }
+
+  const requestedCodes = (value || DEFAULT_CITY_SCOPE_CODES.join(","))
+    .split(",")
+    .map((code) => code.trim().toLowerCase())
+    .filter(Boolean);
+  const requestedSet = new Set(requestedCodes);
+  const selected = cityScopes.filter(([cityCode]) => requestedSet.has(cityCode.toLowerCase()));
+
+  if (selected.length) {
+    return selected;
+  }
+
+  const fallbackSet = new Set(DEFAULT_CITY_SCOPE_CODES.map((code) => code.toLowerCase()));
+  return cityScopes.filter(([cityCode]) => fallbackSet.has(cityCode.toLowerCase()));
 }
 
 async function allSettledWithConcurrency<T, R>(
