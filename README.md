@@ -42,10 +42,10 @@ pnpm run dev
 
 - Framework Preset: `Vite`
 - Install Command: `pnpm install --frozen-lockfile`
-- Build Command: `pnpm --filter @taiwan-live-cam/web build`
-- Output Directory: `apps/web/dist`
+- Build Command: `pnpm run build:vercel`
+- Output Directory: `dist`
 
-如果 Vercel 顯示 `No entrypoint found in output directory: "apps/web/dist"`，代表專案被當成 Node/Other server 專案。請確認 Framework Preset 是 `Vite`；repo 內的 `vercel.json` 也已用 `"framework": "vite"` 固定這個設定。
+如果 Vercel 顯示找不到 `dist` 或 entrypoint，請確認 Root Directory 是 repo 根目錄 `./`，不是 `apps/web`。repo 內的 `vercel.json` 會先建置 `apps/web/dist`，再複製到根目錄 `dist` 給 Vercel 發佈。
 
 Vercel Environment Variables 請設定：
 

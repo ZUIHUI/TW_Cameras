@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,green \"pnpm --filter @taiwan-live-cam/api dev\" \"pnpm --filter @taiwan-live-cam/web dev\"",
     "build": "pnpm --filter @taiwan-live-cam/api build && pnpm --filter @taiwan-live-cam/web build",
+    "build:vercel": "node scripts/vercel-build.mjs",
     "typecheck": "pnpm --filter @taiwan-live-cam/api typecheck && pnpm --filter @taiwan-live-cam/web typecheck"
   },
   "devDependencies": {
