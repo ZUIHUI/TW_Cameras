@@ -41,6 +41,28 @@ button {
   background: #dfe9e3;
 }
 
+.map-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: #31443d;
+}
+
+.map-empty-state strong {
+  font-size: 18px;
+}
+
+.map-empty-state span {
+  max-width: 360px;
+  color: #66766f;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .control-panel,
 .detail-panel {
   position: absolute;

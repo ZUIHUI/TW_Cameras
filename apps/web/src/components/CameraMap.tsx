@@ -1,10 +1,21 @@
-import L from "leaflet";
-import { Circle, Marker, TileLayer, Tooltip, useMap } from "react-leaflet";
-import { MapContainer } from "react-leaflet/MapContainer";
-import { useEffect } from "react";
+import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
+import { MarkerClusterer } from "@googlemaps/markerclusterer";
+import { useEffect, useRef, useState } from "react";
 import type { Camera, VehicleDetector } from "../types";
 
+const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
 const USER_LOCATION_RADIUS_METERS = 500;
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() || "";
+
+const markerColors: Record<Camera["category"] | "traffic", string> = {
+  freeway: "#0e6b52",
+  highway: "#2b6fb0",
+  city: "#b25d17",
+  traffic: "#8b5cf6"
+};
+
+let configuredApiKey = "";
+let mapsLibraryPromise: Promise<google.maps.MapsLibrary> | undefined;
 
 interface CameraMapProps {
   cameras: Camera[];
@@ -16,92 +27,253 @@ interface CameraMapProps {
   onSelectVehicleDetector?: (vd: VehicleDetector) => void;
 }
 
-export function CameraMap({ 
-  cameras, 
-  vehicleDetectors = [], 
-  selectedCamera, 
+export function CameraMap({
+  cameras,
+  vehicleDetectors = [],
+  selectedCamera,
   selectedVehicleDetector,
   userLocation,
-  onSelectCamera, 
-  onSelectVehicleDetector 
+  onSelectCamera,
+  onSelectVehicleDetector
 }: CameraMapProps) {
-  return (
-    <MapContainer center={[23.75, 121]} className="map-canvas" maxZoom={18} minZoom={6} scrollWheelZoom zoom={7}>
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      <MapFocus camera={selectedCamera} vehicleDetector={selectedVehicleDetector} userLocation={userLocation} />
-      {userLocation && (
-        <Circle
-          center={[userLocation.lat, userLocation.lon]}
-          pathOptions={{ color: "#2563eb", fillColor: "#60a5fa", fillOpacity: 0.14, weight: 2 }}
-          radius={USER_LOCATION_RADIUS_METERS}
-        />
-      )}
-      {cameras.map((camera) => (
-        <Marker
-          eventHandlers={{ click: () => onSelectCamera(camera) }}
-          icon={markerIcon(camera, selectedCamera?.id === camera.id)}
-          key={camera.id}
-          position={[camera.lat, camera.lon]}
-        >
-          <Tooltip direction="top" offset={[0, -16]} opacity={0.95}>
-            {camera.title}
-          </Tooltip>
-        </Marker>
-      ))}
-      {vehicleDetectors.map((vd) => (
-        <Marker
-          eventHandlers={{ click: () => onSelectVehicleDetector?.(vd) }}
-          icon={vdMarkerIcon(vd, selectedVehicleDetector?.id === vd.id)}
-          key={vd.id}
-          position={[vd.lat, vd.lon]}
-        >
-          <Tooltip direction="top" offset={[0, -16]} opacity={0.95}>
-            {vd.title}
-          </Tooltip>
-        </Marker>
-      ))}
-    </MapContainer>
-  );
-}
+  const mapElementRef = useRef<HTMLDivElement>(null);
+  const clustererRef = useRef<MarkerClusterer | undefined>(undefined);
+  const circleRef = useRef<google.maps.Circle | undefined>(undefined);
+  const onSelectCameraRef = useRef(onSelectCamera);
+  const onSelectVehicleDetectorRef = useRef(onSelectVehicleDetector);
+  const [map, setMap] = useState<google.maps.Map | undefined>();
+  const [loadError, setLoadError] = useState("");
 
-function MapFocus({ camera, vehicleDetector, userLocation }: { camera?: Camera; vehicleDetector?: VehicleDetector; userLocation?: { lat: number; lon: number } }) {
-  const map = useMap();
+  onSelectCameraRef.current = onSelectCamera;
+  onSelectVehicleDetectorRef.current = onSelectVehicleDetector;
 
   useEffect(() => {
-    if (userLocation && !camera && !vehicleDetector) {
-      const bounds = L.latLng(userLocation.lat, userLocation.lon).toBounds(USER_LOCATION_RADIUS_METERS * 2);
-      map.flyToBounds(bounds, { duration: 0.55, maxZoom: 17, padding: [24, 24] });
+    if (!GOOGLE_MAPS_API_KEY) {
       return;
     }
 
-    const target = camera || vehicleDetector;
-    if (target) {
-      map.flyTo([target.lat, target.lon], Math.max(map.getZoom(), 12), { duration: 0.55 });
+    let cancelled = false;
+    loadGoogleMaps(GOOGLE_MAPS_API_KEY)
+      .then(({ Map }) => {
+        if (cancelled || !mapElementRef.current) return;
+
+        const nextMap = new Map(mapElementRef.current, {
+          center: TAIWAN_CENTER,
+          clickableIcons: false,
+          fullscreenControl: false,
+          gestureHandling: "greedy",
+          mapTypeControl: false,
+          maxZoom: 18,
+          minZoom: 6,
+          streetViewControl: false,
+          zoom: 7
+        });
+
+        setMap(nextMap);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      setMap(undefined);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!map) return;
+
+    clustererRef.current?.clearMarkers();
+    const markers = [
+      ...cameras.map((camera) =>
+        createMapMarker({
+          color: markerColors[camera.category],
+          item: camera,
+          map,
+          selected: selectedCamera?.id === camera.id,
+          title: camera.title,
+          onClick: () => onSelectCameraRef.current(camera)
+        })
+      ),
+      ...vehicleDetectors.map((vd) =>
+        createMapMarker({
+          color: markerColors.traffic,
+          item: vd,
+          map,
+          selected: selectedVehicleDetector?.id === vd.id,
+          title: vd.title,
+          onClick: () => onSelectVehicleDetectorRef.current?.(vd)
+        })
+      )
+    ];
+
+    clustererRef.current = new MarkerClusterer({
+      map,
+      markers,
+      renderer: {
+        render: ({ count, position }) =>
+          new google.maps.Marker({
+            icon: {
+              fillColor: "#183c35",
+              fillOpacity: 0.92,
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: Math.min(24, 12 + String(count).length * 3),
+              strokeColor: "#ffffff",
+              strokeWeight: 2
+            },
+            label: {
+              color: "#ffffff",
+              fontSize: "12px",
+              fontWeight: "700",
+              text: String(count)
+            },
+            position,
+            zIndex: google.maps.Marker.MAX_ZINDEX + count
+          })
+      }
+    });
+
+    return () => {
+      clustererRef.current?.clearMarkers();
+      markers.forEach((marker) => marker.setMap(null));
+    };
+  }, [
+    cameras,
+    map,
+    selectedCamera?.id,
+    selectedVehicleDetector?.id,
+    vehicleDetectors
+  ]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    circleRef.current?.setMap(null);
+    if (!userLocation) {
+      return;
     }
-  }, [camera, vehicleDetector, userLocation, map]);
 
-  return null;
+    circleRef.current = new google.maps.Circle({
+      center: toLatLng(userLocation),
+      fillColor: "#60a5fa",
+      fillOpacity: 0.14,
+      map,
+      radius: USER_LOCATION_RADIUS_METERS,
+      strokeColor: "#2563eb",
+      strokeOpacity: 0.9,
+      strokeWeight: 2
+    });
+
+    return () => {
+      circleRef.current?.setMap(null);
+    };
+  }, [map, userLocation]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    const target = selectedCamera || selectedVehicleDetector;
+    if (target) {
+      map.panTo({ lat: target.lat, lng: target.lon });
+      map.setZoom(Math.max(map.getZoom() || 12, 14));
+      return;
+    }
+
+    if (userLocation) {
+      const center = toLatLng(userLocation);
+      const bounds = circleBounds(center, USER_LOCATION_RADIUS_METERS);
+      map.fitBounds(bounds, 24);
+    }
+  }, [map, selectedCamera, selectedVehicleDetector, userLocation]);
+
+  if (!GOOGLE_MAPS_API_KEY) {
+    return (
+      <div className="map-canvas map-empty-state">
+        <strong>尚未設定 Google Maps API key</strong>
+        <span>請在 .env.local 和 Vercel Environment Variables 設定 VITE_GOOGLE_MAPS_API_KEY。</span>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="map-canvas map-empty-state">
+        <strong>Google Maps 暫時無法載入</strong>
+        <span>{loadError}</span>
+      </div>
+    );
+  }
+
+  return <div ref={mapElementRef} className="map-canvas" aria-label="Google Maps 即時影像地圖" />;
 }
 
-function markerIcon(camera: Camera, selected: boolean) {
-  const className = ["marker-pin", camera.category, selected ? "selected" : ""].filter(Boolean).join(" ");
-  return L.divIcon({
-    className,
-    html: "<span></span>",
-    iconSize: selected ? [30, 30] : [22, 22],
-    iconAnchor: selected ? [15, 15] : [11, 11]
-  });
+function loadGoogleMaps(apiKey: string) {
+  if (configuredApiKey !== apiKey) {
+    setOptions({
+      key: apiKey,
+      language: "zh-TW",
+      region: "TW",
+      v: "weekly"
+    });
+    configuredApiKey = apiKey;
+    mapsLibraryPromise = undefined;
+  }
+
+  mapsLibraryPromise ||= importLibrary("maps");
+  return mapsLibraryPromise;
 }
 
-function vdMarkerIcon(vd: VehicleDetector, selected: boolean) {
-  const className = ["marker-pin", "traffic", selected ? "selected" : ""].filter(Boolean).join(" ");
-  return L.divIcon({
-    className,
-    html: "<span></span>",
-    iconSize: selected ? [30, 30] : [22, 22],
-    iconAnchor: selected ? [15, 15] : [11, 11]
+function createMapMarker({
+  color,
+  item,
+  map,
+  onClick,
+  selected,
+  title
+}: {
+  color: string;
+  item: { lat: number; lon: number };
+  map: google.maps.Map;
+  onClick: () => void;
+  selected: boolean;
+  title: string;
+}) {
+  const marker = new google.maps.Marker({
+    icon: {
+      fillColor: color,
+      fillOpacity: 1,
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: selected ? 10 : 7,
+      strokeColor: "#ffffff",
+      strokeWeight: selected ? 4 : 3
+    },
+    map,
+    optimized: true,
+    position: { lat: item.lat, lng: item.lon },
+    title,
+    zIndex: selected ? google.maps.Marker.MAX_ZINDEX + 1 : undefined
   });
+
+  marker.addListener("click", onClick);
+  return marker;
+}
+
+function toLatLng(location: { lat: number; lon: number }): google.maps.LatLngLiteral {
+  return { lat: location.lat, lng: location.lon };
+}
+
+function circleBounds(center: google.maps.LatLngLiteral, radiusMeters: number) {
+  const earthRadiusMeters = 6_378_137;
+  const latOffset = (radiusMeters / earthRadiusMeters) * (180 / Math.PI);
+  const lngOffset = latOffset / Math.cos((center.lat * Math.PI) / 180);
+
+  return {
+    east: center.lng + lngOffset,
+    north: center.lat + latOffset,
+    south: center.lat - latOffset,
+    west: center.lng - lngOffset
+  };
 }
