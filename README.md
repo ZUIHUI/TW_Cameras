@@ -1,64 +1,70 @@
-# 台灣即時影像 Web 原型
+# Taiwan Live Camera Web Prototype
 
-這是一個 Windows 可先開發的 Web 原型，前端用 `Vite + React + TypeScript + Leaflet`，後端用 `Fastify` 做官方公開 API proxy。前端不保存 TDX、中央氣象署或環境部 API key。
+Windows-first web prototype for a Taiwan live camera app.
 
-## 功能
+## Stack
 
-- 讀取真實 TDX CCTV metadata：國道、公路、縣市攝影機。
-- 地圖搜尋、分類、收藏與攝影機詳情。
-- 依縣市查詢天氣、AQI 與水位摘要。
-- 影像串流不經後端轉存；可播放就直接播放，不可播放就提供來源開啟。
+- Web: Vite + React + TypeScript + Leaflet
+- Local API: Fastify
+- Vercel API: root `/api` Vercel Functions
+- Package manager: pnpm
 
-## 設定
+## Local Setup
 
-1. 安裝 Node.js 20 以上與 pnpm。
-2. 複製 `.env.example` 成 `.env.local`，填入：
-   - `TDX_CLIENT_ID`
-   - `TDX_CLIENT_SECRET`
-   - `CWA_API_KEY`
-   - `MOENV_API_KEY`
-3. 安裝套件並啟動：
+Copy `.env.example` to `.env.local` and fill the keys you already have:
+
+```env
+TDX_CLIENT_ID=
+TDX_CLIENT_SECRET=
+CWA_API_KEY=your-cwa-api-key
+MOENV_API_KEY=your-moenv-api-key
+API_PORT=8787
+VITE_API_BASE_URL=/api
+```
+
+Install and run:
 
 ```powershell
 pnpm install
 pnpm run dev
 ```
 
-前端預設在 `http://localhost:5173`，後端 API proxy 預設在 `http://localhost:8787`。
+Local URLs:
 
-## API
+- Web: `http://localhost:5173`
+- API: `http://localhost:8787`
 
+## API Routes
+
+- `GET /api/health`
 - `GET /api/cameras`
 - `GET /api/cameras/:id`
 - `GET /api/environment?county=臺北市`
 - `GET /api/sources`
-- `GET /api/health`
 
-## 部署到 Vercel
+## Vercel Deployment
 
-這個 repo 已包含 `vercel.json` 與 `/api` Vercel Functions。部署時請在 Vercel 使用 repo 根目錄，不要把 Root Directory 改成 `apps/web`。
+Deploy from the repo root. Do not set Root Directory to `apps/web`, because root `/api` contains the Vercel Functions.
 
-建議設定：
+Vercel settings:
 
-- Framework Preset: `Vite`
-- Install Command: `pnpm install --frozen-lockfile`
-- Build Command: `pnpm run build:vercel`
-- Output Directory: `dist`
+```text
+Root Directory: ./
+Framework Preset: Vite
+Install Command: pnpm install --frozen-lockfile
+Build Command: pnpm run build:vercel
+Output Directory: dist
+```
 
-如果 Vercel 顯示找不到 `dist` 或 entrypoint，請確認 Root Directory 是 repo 根目錄 `./`，不是 `apps/web`。repo 內的 `vercel.json` 會先建置 `apps/web/dist`，再複製到根目錄 `dist` 給 Vercel 發佈。若 Dashboard 已設成 `apps/web`，前端可部署但根目錄 `/api` Functions 不會一起部署。
+The root `vite.config.ts` reads `apps/web` as the Vite app root and writes the static build directly to root `dist`.
 
-Vercel Environment Variables 請設定：
+Environment Variables:
 
-- `CWA_API_KEY`
-- `MOENV_API_KEY`
-- `TDX_CLIENT_ID`：TDX 審核通過後再補
-- `TDX_CLIENT_SECRET`：TDX 審核通過後再補
+```text
+CWA_API_KEY
+MOENV_API_KEY
+TDX_CLIENT_ID
+TDX_CLIENT_SECRET
+```
 
-TDX key 尚未設定時，`/api/cameras` 會回傳空清單與來源錯誤提示，網站仍可部署與載入。
-
-## 資料來源
-
-- TDX 運輸資料流通服務
-- 中央氣象署開放資料平台
-- 環境部環境資料開放平台
-- 經濟部水利署即時水位資料
+`TDX_CLIENT_ID` and `TDX_CLIENT_SECRET` can stay empty while waiting for TDX approval. In that state `/api/cameras` returns an empty list with a source warning instead of failing the deployment.

@@ -10,13 +10,15 @@
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,green \"pnpm --filter @taiwan-live-cam/api dev\" \"pnpm --filter @taiwan-live-cam/web dev\"",
     "build": "pnpm --filter @taiwan-live-cam/api build && pnpm --filter @taiwan-live-cam/web build",
-    "build:vercel": "node scripts/vercel-build.mjs",
+    "build:vercel": "vite build --config vite.config.ts",
     "typecheck": "pnpm --filter @taiwan-live-cam/api typecheck && pnpm --filter @taiwan-live-cam/web typecheck"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
     "@types/node": "^22.15.3",
     "concurrently": "^9.1.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vite": "^6.3.4"
   },
   "engines": {
     "node": ">=20"
