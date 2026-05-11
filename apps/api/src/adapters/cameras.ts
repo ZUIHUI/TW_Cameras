@@ -2,7 +2,7 @@ import { timedCache } from "../cache.js";
 import { missingEnv } from "../config.js";
 import { UpstreamError } from "../http.js";
 import { tdxGet } from "../tdx.js";
-import type { Camera, CameraCatalog, CameraCategory, SourceError, StreamType, VehicleDetector } from "../types.js";
+import type { Camera, CameraCatalog, CameraCatalogSummary, CameraCategory, SourceError, StreamType, VehicleDetector } from "../types.js";
 import { resolveTownFromCoordinate } from "./townResolver.js";
 
 const CAMERA_TTL_MS = 20 * 60 * 1000;
@@ -75,16 +75,19 @@ export async function getCameraCatalog() {
 
 async function loadCameraCatalog(): Promise<CameraCatalog> {
   if (missingEnv(["tdxClientId", "tdxClientSecret"]).length) {
+    const sourceErrors = [
+      {
+        source: "TDX 運輸資料流通服務",
+        endpoint: "TDX OAuth / Road Traffic CCTV & VD",
+        message: "TDX_CLIENT_ID and TDX_CLIENT_SECRET are not set yet."
+      }
+    ];
+
     return {
       cameras: [],
       vehicleDetectors: [],
-      sourceErrors: [
-        {
-          source: "TDX 運輸資料流通服務",
-          endpoint: "TDX OAuth / Road Traffic CCTV & VD",
-          message: "TDX_CLIENT_ID and TDX_CLIENT_SECRET are not set yet."
-        }
-      ],
+      sourceErrors,
+      summary: buildSummary([], [], sourceErrors),
       updatedAt: new Date().toISOString()
     };
   }
@@ -112,11 +115,57 @@ async function loadCameraCatalog(): Promise<CameraCatalog> {
     }
   ];
 
+  const sourceErrors = [...cameraErrors, ...vdErrors];
+
   return {
     cameras,
     vehicleDetectors,
-    sourceErrors: [...cameraErrors, ...vdErrors],
+    sourceErrors,
+    summary: buildSummary(cameras, vehicleDetectors, sourceErrors),
     updatedAt: new Date().toISOString()
+  };
+}
+
+function buildSummary(cameras: Camera[], vehicleDetectors: VehicleDetector[], sourceErrors: SourceError[]): CameraCatalogSummary {
+  const byCategory: Record<CameraCategory, number> = {
+    freeway: 0,
+    highway: 0,
+    city: 0
+  };
+  const byStreamType: Record<StreamType, number> = {
+    hls: 0,
+    mjpeg: 0,
+    snapshot: 0,
+    webpage: 0,
+    unknown: 0
+  };
+  const byCounty: Record<string, number> = {};
+
+  for (const camera of cameras) {
+    byCategory[camera.category] += 1;
+    byStreamType[camera.streamType] += 1;
+
+    const county = camera.county || "未標示縣市";
+    byCounty[county] = (byCounty[county] || 0) + 1;
+  }
+
+  const hasAnyTrafficData = cameras.length > 0 || vehicleDetectors.length > 0;
+  const status = !hasAnyTrafficData && sourceErrors.length > 0 ? "unavailable" : sourceErrors.length > 0 ? "partial" : "ok";
+
+  return {
+    cameras: {
+      total: cameras.length,
+      byCategory,
+      byStreamType,
+      byCounty
+    },
+    vehicleDetectors: {
+      total: vehicleDetectors.length
+    },
+    sourceHealth: {
+      status,
+      errorCount: sourceErrors.length
+    }
   };
 }
 

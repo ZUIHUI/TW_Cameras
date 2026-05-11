@@ -1,6 +1,7 @@
 export type CameraCategory = "freeway" | "highway" | "city";
 export type StreamType = "hls" | "mjpeg" | "snapshot" | "webpage" | "unknown";
 export type CameraStatus = "online" | "offline" | "unknown";
+export type SourceHealthStatus = "ok" | "partial" | "unavailable";
 
 export interface Camera {
   id: string;
@@ -51,10 +52,27 @@ export interface SourceError {
   message: string;
 }
 
+export interface CameraCatalogSummary {
+  cameras: {
+    total: number;
+    byCategory: Record<CameraCategory, number>;
+    byStreamType: Record<StreamType, number>;
+    byCounty: Record<string, number>;
+  };
+  vehicleDetectors: {
+    total: number;
+  };
+  sourceHealth: {
+    status: SourceHealthStatus;
+    errorCount: number;
+  };
+}
+
 export interface CameraCatalogResponse {
   cameras: Camera[];
   vehicleDetectors: VehicleDetector[];
   sourceErrors: SourceError[];
+  summary: CameraCatalogSummary;
   updatedAt: string;
   cache: {
     updatedAt: string;
@@ -98,4 +116,9 @@ export interface UserLocation {
   lon: number;
 }
 
-export type CategoryFilter = "all" | "nearby" | CameraCategory | "traffic" | "favorites";
+export type CameraFilter = "all" | "nearby" | CameraCategory | "favorites";
+
+export interface VisibleLayers {
+  cameras: boolean;
+  vehicleDetectors: boolean;
+}
