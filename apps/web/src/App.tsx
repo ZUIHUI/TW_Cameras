@@ -38,7 +38,7 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
 ];
 
 const favoriteStorageKey = "taiwan-live-cam:favorites";
-type ForegroundListMode = Extract<CameraFilter, "scenic" | "favorites">;
+type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 let startupLocationRequested = false;
 
 export default function App() {
@@ -51,7 +51,7 @@ export default function App() {
   const [environment, setEnvironment] = useState<EnvironmentSummary | undefined>();
   const [query, setQuery] = useState("");
   const [cameraFilter, setCameraFilter] = useState<CameraFilter>("all");
-  const [foregroundListMode, setForegroundListMode] = useState<ForegroundListMode | undefined>();
+  const [focusedListFilter, setFocusedListFilter] = useState<FocusedListFilter | undefined>();
   const [visibleLayers, setVisibleLayers] = useState<VisibleLayers>({
     cameras: true,
     vehicleDetectors: true
@@ -160,7 +160,7 @@ export default function App() {
       return;
     }
 
-    setForegroundListMode(undefined);
+    setFocusedListFilter(undefined);
 
     if (!navigator.geolocation) {
       if (!options.silent) setError("此瀏覽器不支援定位。");
@@ -213,7 +213,7 @@ export default function App() {
 
       if (layer === "cameras" && current.cameras) {
         setSelectedCamera(undefined);
-        setForegroundListMode(undefined);
+        setFocusedListFilter(undefined);
       }
       if (layer === "vehicleDetectors" && current.vehicleDetectors) {
         setSelectedVehicleDetector(undefined);
@@ -244,11 +244,11 @@ export default function App() {
       setPlacePredictions([]);
       setPlacesError("");
       setQuery("");
-      setForegroundListMode(filter);
+      setFocusedListFilter(filter);
       return;
     }
 
-    setForegroundListMode(undefined);
+    setFocusedListFilter(undefined);
   }
 
   const filteredCameras = useMemo(() => {
@@ -341,7 +341,7 @@ export default function App() {
     setPlacePredictions([]);
     setPlacesError("");
     setCameraFilter(filterBeforePlaceSearch.current);
-    setForegroundListMode(undefined);
+    setFocusedListFilter(undefined);
   }
 
   function activatePlaceSearch(place: SearchPlace) {
@@ -354,7 +354,7 @@ export default function App() {
     setSelectedVehicleDetector(undefined);
     setQuery(place.title);
     setPlacePredictions([]);
-    setForegroundListMode(undefined);
+    setFocusedListFilter(undefined);
     setVisibleLayers((current) => ({ ...current, cameras: true, vehicleDetectors: true }));
     setCameraFilter("nearby");
   }
@@ -416,16 +416,15 @@ export default function App() {
 
   const favoriteCount = favorites.size;
   const selectedIsFavorite = selectedCamera ? favorites.has(selectedCamera.id) : false;
-  const isForegroundList = Boolean(foregroundListMode);
+  const isFocusedList = Boolean(focusedListFilter);
   const visibleCameras = filteredCameras.slice(0, visibleCount);
   const vehicleDetectorLimit = visibleLayers.cameras ? Math.min(40, visibleCount) : visibleCount;
   const visibleVehicleDetectors = filteredVehicleDetectors.slice(0, vehicleDetectorLimit);
-  const shownItemCount = visibleCameras.length + (isForegroundList ? 0 : visibleVehicleDetectors.length);
-  const totalFilteredCount = filteredCameras.length + (isForegroundList ? 0 : filteredVehicleDetectors.length);
+  const shownItemCount = visibleCameras.length + (isFocusedList ? 0 : visibleVehicleDetectors.length);
+  const totalFilteredCount = filteredCameras.length + (isFocusedList ? 0 : filteredVehicleDetectors.length);
   const canLoadMore =
     filteredCameras.length > visibleCameras.length ||
-    (!isForegroundList && filteredVehicleDetectors.length > visibleVehicleDetectors.length);
-  const foregroundListLabel = foregroundListMode ? cameraFilterLabel(foregroundListMode) : "";
+    (!isFocusedList && filteredVehicleDetectors.length > visibleVehicleDetectors.length);
   const sourceHealth = summary?.sourceHealth.status ?? "unavailable";
   const sourceIssueText = sourceHealthText(sourceHealth, summary?.sourceHealth.errorCount ?? 0);
 
@@ -433,17 +432,17 @@ export default function App() {
     <main className="app-shell">
       <CameraMap
         cameras={filteredCameras}
-        vehicleDetectors={isForegroundList ? [] : filteredVehicleDetectors}
+        vehicleDetectors={isFocusedList ? [] : filteredVehicleDetectors}
         selectedCamera={selectedCamera}
         selectedVehicleDetector={selectedVehicleDetector}
         searchPlace={searchPlace}
         userLocation={userLocation}
-        focusCameras={foregroundListMode ? filteredCameras : undefined}
+        focusCameras={focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
         onSelectVehicleDetector={selectVehicleDetector}
       />
 
-      <aside className={isForegroundList ? "control-panel foreground-list-mode" : "control-panel"} aria-label="即時影像控制面板">
+      <aside className="control-panel" aria-label="即時影像控制面板">
         <div className="brand-row">
           <div>
             <p className="eyebrow">Taiwan Live Cam</p>
@@ -462,7 +461,7 @@ export default function App() {
               onChange={(event) => {
                 setQuery(event.target.value);
                 if (searchPlace) setSearchPlace(undefined);
-                if (foregroundListMode) setForegroundListMode(undefined);
+                if (focusedListFilter) setFocusedListFilter(undefined);
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -597,15 +596,6 @@ export default function App() {
           <span>{loading ? "載入真實資料中" : `${shownItemCount.toLocaleString()} / ${totalFilteredCount.toLocaleString()} 個點位`}</span>
           {catalog?.updatedAt && <span>{formatRelativeTime(catalog.updatedAt)}</span>}
         </div>
-        {foregroundListMode && (
-          <div className="foreground-list-heading">
-            <div>
-              <span>前景列表</span>
-              <strong>{foregroundListLabel}</strong>
-            </div>
-            <small>{filteredCameras.length.toLocaleString()} 個影像</small>
-          </div>
-        )}
         {searchPlace && !shownItemCount && (
           <div className="status-message warning">
             <AlertCircle size={17} />
@@ -632,7 +622,7 @@ export default function App() {
             </button>
           ))}
 
-          {!isForegroundList && visibleLayers.vehicleDetectors && visibleVehicleDetectors.length > 0 && (
+          {!isFocusedList && visibleLayers.vehicleDetectors && visibleVehicleDetectors.length > 0 && (
             <section className="vd-list-section" aria-label="交通點位">
               <div className="section-label">
                 <Activity size={15} />
@@ -875,13 +865,6 @@ function distanceKm(location: UserLocation, item: { lat: number; lon: number }) 
 
 function toRad(value: number) {
   return (value * Math.PI) / 180;
-}
-
-function cameraFilterLabel(filter: CameraFilter) {
-  if (filter === "favorites") return "收藏";
-  if (filter === "nearby") return "附近";
-  if (filter === "all") return "全部";
-  return categoryLabel(filter);
 }
 
 function categoryLabel(category: Camera["category"]) {
