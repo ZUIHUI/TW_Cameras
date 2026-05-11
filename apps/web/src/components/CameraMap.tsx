@@ -1,8 +1,10 @@
 import L from "leaflet";
-import { Marker, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { Circle, Marker, TileLayer, Tooltip, useMap } from "react-leaflet";
 import { MapContainer } from "react-leaflet/MapContainer";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import type { Camera, VehicleDetector } from "../types";
+
+const USER_LOCATION_RADIUS_METERS = 500;
 
 interface CameraMapProps {
   cameras: Camera[];
@@ -30,6 +32,13 @@ export function CameraMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <MapFocus camera={selectedCamera} vehicleDetector={selectedVehicleDetector} userLocation={userLocation} />
+      {userLocation && (
+        <Circle
+          center={[userLocation.lat, userLocation.lon]}
+          pathOptions={{ color: "#2563eb", fillColor: "#60a5fa", fillOpacity: 0.14, weight: 2 }}
+          radius={USER_LOCATION_RADIUS_METERS}
+        />
+      )}
       {cameras.map((camera) => (
         <Marker
           eventHandlers={{ click: () => onSelectCamera(camera) }}
@@ -62,13 +71,12 @@ function MapFocus({ camera, vehicleDetector, userLocation }: { camera?: Camera; 
   const map = useMap();
 
   useEffect(() => {
-    // If user location is set, zoom to show 5km radius (zoom level 12 covers ~5km)
     if (userLocation && !camera && !vehicleDetector) {
-      map.flyTo([userLocation.lat, userLocation.lon], 12, { duration: 0.55 });
+      const bounds = L.latLng(userLocation.lat, userLocation.lon).toBounds(USER_LOCATION_RADIUS_METERS * 2);
+      map.flyToBounds(bounds, { duration: 0.55, maxZoom: 17, padding: [24, 24] });
       return;
     }
 
-    // Otherwise, focus on selected camera or vehicle detector
     const target = camera || vehicleDetector;
     if (target) {
       map.flyTo([target.lat, target.lon], Math.max(map.getZoom(), 12), { duration: 0.55 });

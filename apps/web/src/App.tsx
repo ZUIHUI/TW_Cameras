@@ -11,7 +11,7 @@ import {
   Video,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getCameras, getEnvironment } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
@@ -35,6 +35,7 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
 ];
 
 const favoriteStorageKey = "taiwan-live-cam:favorites";
+let startupLocationRequested = false;
 
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
@@ -54,11 +55,21 @@ export default function App() {
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [error, setError] = useState("");
   const [environmentError, setEnvironmentError] = useState("");
+  const locationRequestInFlight = useRef(false);
 
   const summary = catalog?.summary;
 
   useEffect(() => {
     loadCameras();
+  }, []);
+
+  useEffect(() => {
+    if (startupLocationRequested) {
+      return;
+    }
+
+    startupLocationRequested = true;
+    requestLocation({ silent: true });
   }, []);
 
   useEffect(() => {
@@ -105,12 +116,17 @@ export default function App() {
     }
   }
 
-  function requestLocation() {
-    if (!navigator.geolocation) {
-      setError("此瀏覽器不支援定位。");
+  function requestLocation(options: { silent?: boolean } = {}) {
+    if (locationRequestInFlight.current) {
       return;
     }
 
+    if (!navigator.geolocation) {
+      if (!options.silent) setError("此瀏覽器不支援定位。");
+      return;
+    }
+
+    locationRequestInFlight.current = true;
     setLoadingLocation(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -120,15 +136,17 @@ export default function App() {
         });
         setCameraFilter("nearby");
         setLoadingLocation(false);
+        locationRequestInFlight.current = false;
       },
       () => {
-        setError("無法取得定位，請確認瀏覽器權限後再試。");
+        if (!options.silent) setError("無法取得定位，請確認瀏覽器權限後再試。");
         setLoadingLocation(false);
+        locationRequestInFlight.current = false;
       },
       {
-        enableHighAccuracy: false,
-        maximumAge: 5 * 60 * 1000,
-        timeout: 8000
+        enableHighAccuracy: true,
+        maximumAge: 60 * 1000,
+        timeout: 10000
       }
     );
   }
@@ -302,7 +320,7 @@ export default function App() {
         />
 
         <div className="quick-actions">
-          <button className="action-button" type="button" onClick={requestLocation}>
+          <button className="action-button" type="button" onClick={() => requestLocation()}>
             <LocateFixed size={17} />
             {loadingLocation ? "定位中" : "附近影像"}
           </button>
