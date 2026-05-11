@@ -324,6 +324,12 @@ h3 {
   text-align: center;
 }
 
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 2px;
+}
+
 .marker-pin {
   background: transparent;
 }

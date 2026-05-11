@@ -34,6 +34,7 @@ export default function App() {
   const [category, setCategory] = useState<CategoryFilter>("all");
   const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites());
   const [userLocation, setUserLocation] = useState<UserLocation | undefined>();
+  const [visibleCount, setVisibleCount] = useState(80);
   const [loading, setLoading] = useState(true);
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [error, setError] = useState("");
@@ -69,6 +70,10 @@ export default function App() {
       active = false;
     };
   }, [selectedCamera?.county]);
+
+  useEffect(() => {
+    setVisibleCount(80);
+  }, [category, query]);
 
   async function loadCameras() {
     setLoading(true);
@@ -152,8 +157,19 @@ export default function App() {
     return filtered;
   }, [catalog?.cameras, category, favorites, query, userLocation]);
 
+  useEffect(() => {
+    if (!filteredCameras.length) {
+      return;
+    }
+
+    if (!selectedCamera || !filteredCameras.some((camera) => camera.id === selectedCamera.id)) {
+      setSelectedCamera(filteredCameras[0]);
+    }
+  }, [filteredCameras, selectedCamera]);
+
   const favoriteCount = favorites.size;
   const selectedIsFavorite = selectedCamera ? favorites.has(selectedCamera.id) : false;
+  const visibleCameras = filteredCameras.slice(0, visibleCount);
 
   return (
     <main className="app-shell">
@@ -224,12 +240,16 @@ export default function App() {
         )}
 
         <div className="meta-row">
-          <span>{loading ? "載入真實資料中" : `${filteredCameras.length.toLocaleString()} 支攝影機`}</span>
+          <span>
+            {loading
+              ? "載入真實資料中"
+              : `${Math.min(filteredCameras.length, visibleCount).toLocaleString()} / ${filteredCameras.length.toLocaleString()} 支攝影機`}
+          </span>
           {catalog?.updatedAt && <span>{formatRelativeTime(catalog.updatedAt)}</span>}
         </div>
 
         <div className="camera-list" aria-label="攝影機清單">
-          {filteredCameras.map((camera) => (
+          {visibleCameras.map((camera) => (
             <button
               className={camera.id === selectedCamera?.id ? "camera-item active" : "camera-item"}
               key={camera.id}
@@ -251,6 +271,14 @@ export default function App() {
             <div className="empty-state">
               <Video size={22} />
               <span>沒有符合條件的影像。</span>
+            </div>
+          )}
+
+          {filteredCameras.length > visibleCount && (
+            <div className="load-more-row">
+              <button className="action-button" type="button" onClick={() => setVisibleCount((count) => count + 80)}>
+                顯示更多攝影機 ({filteredCameras.length - visibleCount} 則更多)
+              </button>
             </div>
           )}
         </div>
