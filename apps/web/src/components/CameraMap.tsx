@@ -1,10 +1,11 @@
-import { MarkerClusterer } from "@googlemaps/markerclusterer";
+import { MarkerClusterer, SuperClusterViewportAlgorithm } from "@googlemaps/markerclusterer";
 import { useEffect, useRef, useState } from "react";
 import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
 import type { Camera, SearchPlace, VehicleDetector } from "../types";
 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
 const USER_LOCATION_RADIUS_METERS = 500;
+const VIEWPORT_PADDING_RATIO = 0.35;
 
 const markerColors: Record<Camera["category"] | "traffic", string> = {
   freeway: "#0e6b52",
@@ -26,6 +27,17 @@ interface CameraMapProps {
   onSelectVehicleDetector?: (vd: VehicleDetector) => void;
 }
 
+type MarkerKind = "camera" | "vd";
+
+interface MarkerEntry {
+  kind: MarkerKind;
+  marker: google.maps.Marker;
+}
+
+type MarkerData =
+  | { kind: "camera"; item: Camera }
+  | { kind: "vd"; item: VehicleDetector };
+
 export function CameraMap({
   cameras,
   vehicleDetectors = [],
@@ -39,15 +51,68 @@ export function CameraMap({
 }: CameraMapProps) {
   const mapElementRef = useRef<HTMLDivElement>(null);
   const clustererRef = useRef<MarkerClusterer | undefined>(undefined);
+  const markerCacheRef = useRef<Map<string, MarkerEntry>>(new Map());
+  const markerDataRef = useRef<Map<string, MarkerData>>(new Map());
+  const renderedMarkerKeysRef = useRef<Set<string>>(new Set());
   const circleRef = useRef<google.maps.Circle | undefined>(undefined);
   const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const onSelectCameraRef = useRef(onSelectCamera);
   const onSelectVehicleDetectorRef = useRef(onSelectVehicleDetector);
   const [map, setMap] = useState<google.maps.Map | undefined>();
+  const [viewportBounds, setViewportBounds] = useState<google.maps.LatLngBoundsLiteral | undefined>();
   const [loadError, setLoadError] = useState("");
 
   onSelectCameraRef.current = onSelectCamera;
   onSelectVehicleDetectorRef.current = onSelectVehicleDetector;
+
+  function ensureMarker({
+    color,
+    key,
+    kind,
+    item,
+    selected,
+    title
+  }: {
+    color: string;
+    key: string;
+    kind: MarkerKind;
+    item: { lat: number; lon: number };
+    selected: boolean;
+    title: string;
+  }): MarkerEntry {
+    const cached = markerCacheRef.current.get(key);
+    if (cached) {
+      cached.marker.setIcon(markerIcon(color, selected));
+      cached.marker.setPosition({ lat: item.lat, lng: item.lon });
+      cached.marker.setTitle(title);
+      cached.marker.setZIndex(selected ? google.maps.Marker.MAX_ZINDEX + 1 : undefined);
+      return cached;
+    }
+
+    const marker = new google.maps.Marker({
+      icon: markerIcon(color, selected),
+      optimized: true,
+      position: { lat: item.lat, lng: item.lon },
+      title,
+      zIndex: selected ? google.maps.Marker.MAX_ZINDEX + 1 : undefined
+    });
+
+    marker.addListener("click", () => {
+      const markerData = markerDataRef.current.get(key);
+      if (!markerData) return;
+
+      if (markerData.kind === "camera") {
+        onSelectCameraRef.current(markerData.item);
+        return;
+      }
+
+      onSelectVehicleDetectorRef.current?.(markerData.item);
+    });
+
+    const entry = { kind, marker };
+    markerCacheRef.current.set(key, entry);
+    return entry;
+  }
 
   useEffect(() => {
     if (!GOOGLE_MAPS_API_KEY) {
@@ -88,33 +153,14 @@ export function CameraMap({
   useEffect(() => {
     if (!map) return;
 
-    clustererRef.current?.clearMarkers();
-    const markers = [
-      ...cameras.map((camera) =>
-        createMapMarker({
-          color: markerColors[camera.category],
-          item: camera,
-          map,
-          selected: selectedCamera?.id === camera.id,
-          title: camera.title,
-          onClick: () => onSelectCameraRef.current(camera)
-        })
-      ),
-      ...vehicleDetectors.map((vd) =>
-        createMapMarker({
-          color: markerColors.traffic,
-          item: vd,
-          map,
-          selected: selectedVehicleDetector?.id === vd.id,
-          title: vd.title,
-          onClick: () => onSelectVehicleDetectorRef.current?.(vd)
-        })
-      )
-    ];
-
     clustererRef.current = new MarkerClusterer({
       map,
-      markers,
+      markers: [],
+      algorithm: new SuperClusterViewportAlgorithm({
+        maxZoom: 17,
+        radius: 84,
+        viewportPadding: 120
+      }),
       renderer: {
         render: ({ count, position }) =>
           new google.maps.Marker({
@@ -140,14 +186,131 @@ export function CameraMap({
 
     return () => {
       clustererRef.current?.clearMarkers();
-      markers.forEach((marker) => marker.setMap(null));
+      markerCacheRef.current.forEach(({ marker }) => marker.setMap(null));
+      markerCacheRef.current.clear();
+      markerDataRef.current.clear();
+      renderedMarkerKeysRef.current.clear();
+      clustererRef.current = undefined;
     };
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    const syncViewportBounds = () => {
+      const nextBounds = map.getBounds();
+      if (!nextBounds) return;
+
+      setViewportBounds(boundsToLiteral(nextBounds));
+    };
+
+    const listener = map.addListener("idle", syncViewportBounds);
+    syncViewportBounds();
+
+    return () => {
+      listener.remove();
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!map || !clustererRef.current || !viewportBounds) return;
+
+    const paddedBounds = padBounds(viewportBounds, VIEWPORT_PADDING_RATIO);
+    const selectedCameraKey = selectedCamera ? cameraMarkerKey(selectedCamera.id) : "";
+    const selectedVdKey = selectedVehicleDetector ? vehicleDetectorMarkerKey(selectedVehicleDetector.id) : "";
+    const nextKeys = new Set<string>();
+    const validKeys = new Set<string>();
+    const markersToAdd: google.maps.Marker[] = [];
+    const markersToRemove: google.maps.Marker[] = [];
+
+    cameras.forEach((camera) => {
+      const key = cameraMarkerKey(camera.id);
+      validKeys.add(key);
+      markerDataRef.current.set(key, { kind: "camera", item: camera });
+
+      if (!isWithinBounds(camera, paddedBounds) && key !== selectedCameraKey) {
+        return;
+      }
+
+      nextKeys.add(key);
+      const entry = ensureMarker({
+        key,
+        kind: "camera",
+        color: markerColors[camera.category],
+        item: camera,
+        selected: key === selectedCameraKey,
+        title: camera.title
+      });
+
+      if (!renderedMarkerKeysRef.current.has(key)) {
+        markersToAdd.push(entry.marker);
+      }
+    });
+
+    vehicleDetectors.forEach((vehicleDetector) => {
+      const key = vehicleDetectorMarkerKey(vehicleDetector.id);
+      validKeys.add(key);
+      markerDataRef.current.set(key, { kind: "vd", item: vehicleDetector });
+
+      if (!isWithinBounds(vehicleDetector, paddedBounds) && key !== selectedVdKey) {
+        return;
+      }
+
+      nextKeys.add(key);
+      const entry = ensureMarker({
+        key,
+        kind: "vd",
+        color: markerColors.traffic,
+        item: vehicleDetector,
+        selected: key === selectedVdKey,
+        title: vehicleDetector.title
+      });
+
+      if (!renderedMarkerKeysRef.current.has(key)) {
+        markersToAdd.push(entry.marker);
+      }
+    });
+
+    markerCacheRef.current.forEach((entry, key) => {
+      if (!validKeys.has(key)) {
+        if (renderedMarkerKeysRef.current.has(key)) {
+          markersToRemove.push(entry.marker);
+        }
+        entry.marker.setMap(null);
+        markerCacheRef.current.delete(key);
+        markerDataRef.current.delete(key);
+        renderedMarkerKeysRef.current.delete(key);
+      }
+    });
+
+    renderedMarkerKeysRef.current.forEach((key) => {
+      if (!nextKeys.has(key)) {
+        const entry = markerCacheRef.current.get(key);
+        if (entry) {
+          markersToRemove.push(entry.marker);
+          entry.marker.setMap(null);
+        }
+      }
+    });
+
+    if (markersToRemove.length) {
+      clustererRef.current.removeMarkers(markersToRemove, true);
+    }
+    if (markersToAdd.length) {
+      clustererRef.current.addMarkers(markersToAdd, true);
+    }
+    if (markersToRemove.length || markersToAdd.length || selectedCameraKey || selectedVdKey) {
+      clustererRef.current.render();
+    }
+
+    renderedMarkerKeysRef.current = nextKeys;
   }, [
     cameras,
     map,
     selectedCamera?.id,
     selectedVehicleDetector?.id,
-    vehicleDetectors
+    vehicleDetectors,
+    viewportBounds
   ]);
 
   useEffect(() => {
@@ -270,41 +433,6 @@ export function CameraMap({
   return <div ref={mapElementRef} className="map-canvas" aria-label="Google Maps 即時影像地圖" />;
 }
 
-function createMapMarker({
-  color,
-  item,
-  map,
-  onClick,
-  selected,
-  title
-}: {
-  color: string;
-  item: { lat: number; lon: number };
-  map: google.maps.Map;
-  onClick: () => void;
-  selected: boolean;
-  title: string;
-}) {
-  const marker = new google.maps.Marker({
-    icon: {
-      fillColor: color,
-      fillOpacity: 1,
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: selected ? 10 : 7,
-      strokeColor: "#ffffff",
-      strokeWeight: selected ? 4 : 3
-    },
-    map,
-    optimized: true,
-    position: { lat: item.lat, lng: item.lon },
-    title,
-    zIndex: selected ? google.maps.Marker.MAX_ZINDEX + 1 : undefined
-  });
-
-  marker.addListener("click", onClick);
-  return marker;
-}
-
 function toLatLng(location: { lat: number; lon: number }): google.maps.LatLngLiteral {
   return { lat: location.lat, lng: location.lon };
 }
@@ -320,4 +448,50 @@ function circleBounds(center: google.maps.LatLngLiteral, radiusMeters: number) {
     south: center.lat - latOffset,
     west: center.lng - lngOffset
   };
+}
+
+function markerIcon(color: string, selected: boolean): google.maps.Symbol {
+  return {
+    fillColor: color,
+    fillOpacity: 1,
+    path: google.maps.SymbolPath.CIRCLE,
+    scale: selected ? 10 : 7,
+    strokeColor: "#ffffff",
+    strokeWeight: selected ? 4 : 3
+  };
+}
+
+function cameraMarkerKey(id: string) {
+  return `camera:${id}`;
+}
+
+function vehicleDetectorMarkerKey(id: string) {
+  return `vd:${id}`;
+}
+
+function boundsToLiteral(bounds: google.maps.LatLngBounds): google.maps.LatLngBoundsLiteral {
+  const northEast = bounds.getNorthEast();
+  const southWest = bounds.getSouthWest();
+  return {
+    east: northEast.lng(),
+    north: northEast.lat(),
+    south: southWest.lat(),
+    west: southWest.lng()
+  };
+}
+
+function padBounds(bounds: google.maps.LatLngBoundsLiteral, ratio: number): google.maps.LatLngBoundsLiteral {
+  const latPadding = Math.max(0.01, (bounds.north - bounds.south) * ratio);
+  const lngPadding = Math.max(0.01, (bounds.east - bounds.west) * ratio);
+
+  return {
+    east: bounds.east + lngPadding,
+    north: bounds.north + latPadding,
+    south: bounds.south - latPadding,
+    west: bounds.west - lngPadding
+  };
+}
+
+function isWithinBounds(item: { lat: number; lon: number }, bounds: google.maps.LatLngBoundsLiteral) {
+  return item.lat >= bounds.south && item.lat <= bounds.north && item.lon >= bounds.west && item.lon <= bounds.east;
 }
