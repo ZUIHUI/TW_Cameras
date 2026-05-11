@@ -221,13 +221,11 @@ export default function App() {
   function selectCamera(camera: Camera) {
     setSelectedCamera(camera);
     setSelectedVehicleDetector(undefined);
-    setSearchPlace(undefined);
   }
 
   function selectVehicleDetector(vehicleDetector: VehicleDetector) {
     setSelectedVehicleDetector(vehicleDetector);
     setSelectedCamera(undefined);
-    setSearchPlace(undefined);
   }
 
   const filteredCameras = useMemo(() => {
