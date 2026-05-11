@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.tools/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+.DS_Store
+Thumbs.db
+apps/web/dist/
+apps/api/dist/

@@ -1,0 +1,22 @@
+{
+  "name": "taiwan-live-cam-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,green \"pnpm --filter @taiwan-live-cam/api dev\" \"pnpm --filter @taiwan-live-cam/web dev\"",
+    "build": "pnpm --filter @taiwan-live-cam/api build && pnpm --filter @taiwan-live-cam/web build",
+    "typecheck": "pnpm --filter @taiwan-live-cam/api typecheck && pnpm --filter @taiwan-live-cam/web typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
