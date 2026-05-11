@@ -83,6 +83,10 @@ button {
   gap: 14px;
 }
 
+.control-panel.foreground-list-mode {
+  width: min(460px, calc(100vw - 36px));
+}
+
 .brand-row,
 .detail-header,
 .quick-actions,
@@ -467,10 +471,42 @@ h3 {
   font-size: 13px;
 }
 
+.foreground-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(17, 103, 77, 0.18);
+  border-radius: 8px;
+  background: #eef9f4;
+  padding: 11px 12px;
+}
+
+.foreground-list-heading span,
+.foreground-list-heading small {
+  color: #52655e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.foreground-list-heading strong {
+  display: block;
+  margin-top: 2px;
+  color: #10231c;
+  font-size: 16px;
+}
+
 .camera-list {
   min-height: 0;
   overflow: auto;
   padding-right: 3px;
+}
+
+.foreground-list-mode .camera-list {
+  border: 1px solid rgba(31, 75, 58, 0.12);
+  border-radius: 8px;
+  background: rgba(247, 251, 248, 0.9);
+  padding: 8px 7px 0;
 }
 
 .camera-item {
@@ -872,6 +908,10 @@ h3 {
     max-height: 52vh;
     overflow: auto;
     padding: 14px;
+  }
+
+  .control-panel.foreground-list-mode {
+    max-height: 68vh;
   }
 
   .detail-panel {

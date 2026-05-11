@@ -21,6 +21,7 @@ interface CameraMapProps {
   selectedVehicleDetector?: VehicleDetector;
   searchPlace?: SearchPlace;
   userLocation?: { lat: number; lon: number };
+  focusCameras?: Camera[];
   onSelectCamera: (camera: Camera) => void;
   onSelectVehicleDetector?: (vd: VehicleDetector) => void;
 }
@@ -32,6 +33,7 @@ export function CameraMap({
   selectedVehicleDetector,
   searchPlace,
   userLocation,
+  focusCameras,
   onSelectCamera,
   onSelectVehicleDetector
 }: CameraMapProps) {
@@ -209,6 +211,18 @@ export function CameraMap({
   useEffect(() => {
     if (!map) return;
 
+    if (!userLocation) {
+      return;
+    }
+
+    const center = toLatLng(userLocation);
+    const bounds = circleBounds(center, USER_LOCATION_RADIUS_METERS);
+    map.fitBounds(bounds, 24);
+  }, [map, userLocation?.lat, userLocation?.lon]);
+
+  useEffect(() => {
+    if (!map) return;
+
     const target = selectedCamera || selectedVehicleDetector;
     if (target) {
       map.panTo({ lat: target.lat, lng: target.lon });
@@ -222,12 +236,18 @@ export function CameraMap({
       return;
     }
 
-    if (userLocation) {
-      const center = toLatLng(userLocation);
-      const bounds = circleBounds(center, USER_LOCATION_RADIUS_METERS);
-      map.fitBounds(bounds, 24);
+    if (focusCameras?.length) {
+      if (focusCameras.length === 1) {
+        map.panTo({ lat: focusCameras[0].lat, lng: focusCameras[0].lon });
+        map.setZoom(Math.max(map.getZoom() || 12, 14));
+        return;
+      }
+
+      const bounds = new google.maps.LatLngBounds();
+      focusCameras.forEach((camera) => bounds.extend({ lat: camera.lat, lng: camera.lon }));
+      map.fitBounds(bounds, 68);
     }
-  }, [map, searchPlace, selectedCamera, selectedVehicleDetector, userLocation]);
+  }, [focusCameras, map, searchPlace, selectedCamera, selectedVehicleDetector]);
 
   if (!GOOGLE_MAPS_API_KEY) {
     return (
