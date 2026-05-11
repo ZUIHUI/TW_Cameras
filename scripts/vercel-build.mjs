@@ -5,13 +5,22 @@ import path from "node:path";
 
 const root = process.cwd();
 const localPnpm = path.join(root, ".tools", "package", "bin", "pnpm.cjs");
-const pnpmCommand = existsSync(localPnpm) ? [process.execPath, localPnpm] : ["pnpm"];
+const lifecyclePnpm = process.env.npm_execpath;
+
+const pnpmCommand = existsSync(localPnpm)
+  ? [process.execPath, localPnpm]
+  : lifecyclePnpm
+    ? [process.execPath, lifecyclePnpm]
+    : [process.platform === "win32" ? "pnpm.cmd" : "pnpm"];
 
 const build = spawnSync(pnpmCommand[0], [...pnpmCommand.slice(1), "--filter", "@taiwan-live-cam/web", "build"], {
   cwd: root,
-  stdio: "inherit",
-  shell: false
+  stdio: "inherit"
 });
+
+if (build.error) {
+  console.error(build.error);
+}
 
 if (build.status !== 0) {
   process.exit(build.status ?? 1);

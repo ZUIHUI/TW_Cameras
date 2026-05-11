@@ -45,7 +45,7 @@ pnpm run dev
 - Build Command: `pnpm run build:vercel`
 - Output Directory: `dist`
 
-如果 Vercel 顯示找不到 `dist` 或 entrypoint，請確認 Root Directory 是 repo 根目錄 `./`，不是 `apps/web`。repo 內的 `vercel.json` 會先建置 `apps/web/dist`，再複製到根目錄 `dist` 給 Vercel 發佈。
+如果 Vercel 顯示找不到 `dist` 或 entrypoint，請確認 Root Directory 是 repo 根目錄 `./`，不是 `apps/web`。repo 內的 `vercel.json` 會先建置 `apps/web/dist`，再複製到根目錄 `dist` 給 Vercel 發佈。若 Dashboard 已設成 `apps/web`，前端可部署但根目錄 `/api` Functions 不會一起部署。
 
 Vercel Environment Variables 請設定：
 
