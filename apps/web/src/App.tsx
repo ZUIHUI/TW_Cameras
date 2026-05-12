@@ -61,6 +61,7 @@ export default function App() {
   });
   const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites());
   const [userLocation, setUserLocation] = useState<UserLocation | undefined>();
+  const [userLocationFocusRequest, setUserLocationFocusRequest] = useState(0);
   const [visibleCount, setVisibleCount] = useState(80);
   const [loading, setLoading] = useState(true);
   const [loadingLocation, setLoadingLocation] = useState(false);
@@ -255,11 +256,22 @@ export default function App() {
     setLoadingLocation(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        if (!options.silent) {
+          setSelectedCamera(undefined);
+          setSelectedVehicleDetector(undefined);
+          setSearchPlace(undefined);
+          setPlacePredictions([]);
+          setPlacesError("");
+          setQuery("");
+        }
         setUserLocation({
           lat: position.coords.latitude,
           lon: position.coords.longitude
         });
         setCameraFilter("nearby");
+        if (!options.silent) {
+          setUserLocationFocusRequest((request) => request + 1);
+        }
         setLoadingLocation(false);
         locationRequestInFlight.current = false;
       },
@@ -597,6 +609,7 @@ export default function App() {
         selectedVehicleDetector={selectedVehicleDetector}
         searchPlace={searchPlace}
         userLocation={userLocation}
+        userLocationFocusRequest={userLocationFocusRequest}
         focusCameras={focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
         onSelectVehicleDetector={selectVehicleDetector}

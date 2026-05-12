@@ -22,6 +22,7 @@ interface CameraMapProps {
   selectedVehicleDetector?: VehicleDetector;
   searchPlace?: SearchPlace;
   userLocation?: { lat: number; lon: number };
+  userLocationFocusRequest?: number;
   focusCameras?: Camera[];
   onSelectCamera: (camera: Camera) => void;
   onSelectVehicleDetector?: (vd: VehicleDetector) => void;
@@ -45,6 +46,7 @@ export function CameraMap({
   selectedVehicleDetector,
   searchPlace,
   userLocation,
+  userLocationFocusRequest,
   focusCameras,
   onSelectCamera,
   onSelectVehicleDetector
@@ -381,7 +383,7 @@ export function CameraMap({
     const center = toLatLng(userLocation);
     const bounds = circleBounds(center, USER_LOCATION_RADIUS_METERS);
     map.fitBounds(bounds, 24);
-  }, [map, userLocation?.lat, userLocation?.lon]);
+  }, [map, userLocation?.lat, userLocation?.lon, userLocationFocusRequest]);
 
   useEffect(() => {
     if (!map) return;
