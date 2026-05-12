@@ -89,6 +89,10 @@ input:disabled {
   gap: 14px;
 }
 
+.control-panel-handle {
+  display: none;
+}
+
 .brand-row,
 .detail-header,
 .quick-actions,
@@ -1068,10 +1072,64 @@ h3 {
   }
 
   .control-panel {
+    --panel-drag-offset: 0px;
     inset: auto 8px 8px;
-    max-height: 52vh;
+    height: 52vh;
+    max-height: none;
     overflow: auto;
-    padding: 14px;
+    padding: 8px 14px 14px;
+    transform: translateY(var(--panel-drag-offset));
+    transition:
+      height 180ms ease,
+      transform 180ms ease;
+    will-change: height, transform;
+  }
+
+  .control-panel.dragging {
+    transition: none;
+  }
+
+  .control-panel.snap-full {
+    height: calc(100vh - 16px);
+  }
+
+  .control-panel.snap-hidden {
+    transform: translateY(calc(100% - 42px + var(--panel-drag-offset)));
+  }
+
+  .control-panel-handle {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    width: 100%;
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 30px;
+    border: 0;
+    background: rgba(250, 253, 251, 0.92);
+    cursor: grab;
+    padding: 0;
+    touch-action: none;
+  }
+
+  .control-panel.dragging .control-panel-handle {
+    cursor: grabbing;
+  }
+
+  .control-panel-handle::before {
+    content: "";
+    width: 52px;
+    height: 5px;
+    border-radius: 999px;
+    background: #9dafaa;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+  }
+
+  .control-panel-handle:hover::before,
+  .control-panel-handle:focus-visible::before {
+    background: #5f756c;
   }
 
   .detail-panel {

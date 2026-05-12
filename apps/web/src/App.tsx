@@ -11,7 +11,7 @@ import {
   Video,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getCameras, getEnvironment, getNearbyTourism } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
@@ -41,6 +41,7 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
 
 const favoriteStorageKey = "taiwan-live-cam:favorites";
 type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
+type ControlPanelSnap = "hidden" | "half" | "full";
 let startupLocationRequested = false;
 
 export default function App() {
@@ -70,8 +71,12 @@ export default function App() {
   const [nearbyTourismError, setNearbyTourismError] = useState("");
   const [nearbyTourismLoading, setNearbyTourismLoading] = useState(false);
   const [showSourceDetails, setShowSourceDetails] = useState(false);
+  const [controlPanelSnap, setControlPanelSnap] = useState<ControlPanelSnap>("half");
+  const [controlPanelDragOffset, setControlPanelDragOffset] = useState(0);
   const locationRequestInFlight = useRef(false);
   const filterBeforePlaceSearch = useRef<CameraFilter>("all");
+  const controlPanelDrag = useRef<{ startY: number; moved: boolean } | undefined>(undefined);
+  const suppressPanelHandleClick = useRef(false);
 
   const summary = catalog?.summary;
   const nearbyTourismTarget = useMemo(() => {
@@ -487,6 +492,72 @@ export default function App() {
     (!isFocusedList && filteredVehicleDetectors.length > visibleVehicleDetectors.length);
   const sourceHealth = summary?.sourceHealth.status ?? "unavailable";
   const sourceIssueText = sourceHealthText(sourceHealth, summary?.sourceHealth.errorCount ?? 0);
+  const controlPanelStyle =
+    controlPanelDragOffset !== 0
+      ? ({ "--panel-drag-offset": `${controlPanelDragOffset}px` } as CSSProperties)
+      : undefined;
+
+  function beginControlPanelDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+
+    controlPanelDrag.current = { startY: event.clientY, moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setControlPanelDragOffset(0);
+  }
+
+  function moveControlPanelDrag(event: PointerEvent<HTMLButtonElement>) {
+    const drag = controlPanelDrag.current;
+    if (!drag) {
+      return;
+    }
+
+    const offset = clamp(event.clientY - drag.startY, -window.innerHeight * 0.55, window.innerHeight * 0.72);
+    drag.moved = drag.moved || Math.abs(offset) > 6;
+    setControlPanelDragOffset(offset);
+  }
+
+  function endControlPanelDrag(event: PointerEvent<HTMLButtonElement>) {
+    const drag = controlPanelDrag.current;
+    if (!drag) {
+      return;
+    }
+
+    const offset = event.clientY - drag.startY;
+    suppressPanelHandleClick.current = drag.moved;
+    setControlPanelSnap(resolveControlPanelSnap(controlPanelSnap, offset));
+    setControlPanelDragOffset(0);
+    controlPanelDrag.current = undefined;
+
+    window.setTimeout(() => {
+      suppressPanelHandleClick.current = false;
+    }, 0);
+  }
+
+  function cancelControlPanelDrag() {
+    controlPanelDrag.current = undefined;
+    setControlPanelDragOffset(0);
+  }
+
+  function toggleControlPanelSnap() {
+    if (suppressPanelHandleClick.current) {
+      return;
+    }
+    setControlPanelSnap(nextControlPanelSnap(controlPanelSnap));
+  }
+
+  function handleControlPanelKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setControlPanelSnap("full");
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setControlPanelSnap(controlPanelSnap === "full" ? "half" : "hidden");
+    }
+  }
 
   return (
     <main className="app-shell">
@@ -502,7 +573,23 @@ export default function App() {
         onSelectVehicleDetector={selectVehicleDetector}
       />
 
-      <aside className="control-panel" aria-label="即時影像控制面板">
+      <aside
+        className={`control-panel snap-${controlPanelSnap}${controlPanelDragOffset ? " dragging" : ""}`}
+        style={controlPanelStyle}
+        aria-label="即時影像控制面板"
+      >
+        <button
+          className="control-panel-handle"
+          type="button"
+          aria-expanded={controlPanelSnap !== "hidden"}
+          aria-label="調整控制面板高度"
+          onClick={toggleControlPanelSnap}
+          onKeyDown={handleControlPanelKeyDown}
+          onPointerCancel={cancelControlPanelDrag}
+          onPointerDown={beginControlPanelDrag}
+          onPointerMove={moveControlPanelDrag}
+          onPointerUp={endControlPanelDrag}
+        />
         <div className="brand-row">
           <div>
             <p className="eyebrow">Taiwan Live Cam</p>
@@ -963,6 +1050,24 @@ function distanceKm(location: UserLocation, item: { lat: number; lon: number }) 
 
 function toRad(value: number) {
   return (value * Math.PI) / 180;
+}
+
+function resolveControlPanelSnap(current: ControlPanelSnap, offset: number): ControlPanelSnap {
+  if (offset < -140) return "full";
+  if (offset < -42) return current === "hidden" ? "half" : "full";
+  if (offset > 140) return "hidden";
+  if (offset > 42) return current === "full" ? "half" : "hidden";
+  return current;
+}
+
+function nextControlPanelSnap(current: ControlPanelSnap): ControlPanelSnap {
+  if (current === "hidden") return "half";
+  if (current === "half") return "full";
+  return "half";
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function categoryLabel(category: Camera["category"]) {
