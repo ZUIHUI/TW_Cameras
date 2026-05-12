@@ -1,0 +1,24 @@
+{
+  "name": "\u53f0\u7063\u5373\u6642\u5f71\u50cf",
+  "short_name": "TW Live",
+  "description": "Live views, travel maps, and real-time discovery in Taiwan.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0a4eb9",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

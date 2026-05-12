@@ -10,5 +10,6 @@ _tmp_*
 Thumbs.db
 apps/web/dist/
 apps/api/dist/
+apps/web/public/icon-previews/
 .vercel
 .env*.local
