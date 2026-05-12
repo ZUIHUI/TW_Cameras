@@ -32,12 +32,10 @@ import type {
 
 const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
   { id: "all", label: "全部" },
-  { id: "nearby", label: "附近" },
   { id: "freeway", label: "國道" },
   { id: "highway", label: "省道/公路" },
   { id: "city", label: "市區" },
-  { id: "scenic", label: "風景區" },
-  { id: "favorites", label: "收藏" }
+  { id: "scenic", label: "風景區" }
 ];
 
 const favoriteStorageKey = "taiwan-live-cam:favorites";
@@ -696,12 +694,17 @@ export default function App() {
         />
 
         <div className="quick-actions">
-          <button className="action-button" type="button" onClick={() => requestLocation()} disabled={loadingLocation}>
+          <button
+            className={cameraFilter === "nearby" ? "action-button active" : "action-button"}
+            type="button"
+            onClick={() => requestLocation()}
+            disabled={loadingLocation}
+          >
             <LocateFixed size={17} />
             {loadingLocation ? "定位中" : "附近影像"}
           </button>
           <button
-            className="action-button"
+            className={cameraFilter === "favorites" ? "action-button active" : "action-button"}
             type="button"
             onClick={() => {
               setVisibleLayers((current) => ({ ...current, cameras: true }));

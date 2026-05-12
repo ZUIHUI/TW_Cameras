@@ -327,6 +327,7 @@ h3 {
 }
 
 .chip.active,
+.action-button.active,
 .action-button:active {
   color: #ffffff;
   background: #11674d;
