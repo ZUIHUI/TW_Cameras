@@ -28,6 +28,12 @@ button {
   cursor: pointer;
 }
 
+button:disabled,
+input:disabled {
+  cursor: progress;
+  opacity: 0.62;
+}
+
 .app-shell {
   position: relative;
   width: 100vw;

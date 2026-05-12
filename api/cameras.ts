@@ -1,11 +1,11 @@
 import { getCameraCatalog } from "../apps/api/src/adapters/cameras.js";
-import { toErrorResponse } from "../apps/api/src/vercel.js";
+import { cachedJson, toErrorResponse } from "../apps/api/src/vercel.js";
 
 export default {
   async fetch() {
     try {
       const catalog = await getCameraCatalog();
-      return Response.json({
+      return cachedJson({
         ...catalog.value,
         cache: {
           updatedAt: catalog.updatedAt,

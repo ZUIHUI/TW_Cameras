@@ -1,5 +1,5 @@
 import { getEnvironmentSummary } from "../apps/api/src/adapters/environment.js";
-import { toErrorResponse } from "../apps/api/src/vercel.js";
+import { cachedJson, toErrorResponse } from "../apps/api/src/vercel.js";
 
 export default {
   async fetch(request: Request) {
@@ -10,7 +10,7 @@ export default {
       }
 
       const summary = await getEnvironmentSummary(county);
-      return Response.json({
+      return cachedJson({
         ...summary.value,
         cache: {
           updatedAt: summary.updatedAt,

@@ -1,5 +1,5 @@
 import { getCameraCatalog } from "../../apps/api/src/adapters/cameras.js";
-import { toErrorResponse } from "../../apps/api/src/vercel.js";
+import { cachedJson, toErrorResponse } from "../../apps/api/src/vercel.js";
 
 export default {
   async fetch(request: Request) {
@@ -12,7 +12,7 @@ export default {
         return Response.json({ error: "Camera not found" }, { status: 404 });
       }
 
-      return Response.json({
+      return cachedJson({
         camera,
         cache: {
           updatedAt: catalog.updatedAt,

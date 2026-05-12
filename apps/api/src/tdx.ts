@@ -14,6 +14,7 @@ interface TdxGetOptions {
 const TDX_PUBLIC_USER_AGENT = "Mozilla/5.0 TaiwanLiveCameraPrototype/0.1";
 
 let tokenCache: { token: string; expiresAt: number } | undefined;
+let tokenRequest: Promise<string> | undefined;
 
 export async function getTdxToken(): Promise<string> {
   const missing = missingEnv(["tdxClientId", "tdxClientSecret"]);
@@ -25,6 +26,20 @@ export async function getTdxToken(): Promise<string> {
     return tokenCache.token;
   }
 
+  if (tokenRequest) {
+    return tokenRequest;
+  }
+
+  tokenRequest = requestTdxToken();
+
+  try {
+    return await tokenRequest;
+  } finally {
+    tokenRequest = undefined;
+  }
+}
+
+async function requestTdxToken(): Promise<string> {
   const body = new URLSearchParams({
     grant_type: "client_credentials",
     client_id: config.tdxClientId,

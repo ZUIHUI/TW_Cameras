@@ -61,6 +61,7 @@ export default function App() {
   const [visibleCount, setVisibleCount] = useState(80);
   const [loading, setLoading] = useState(true);
   const [loadingLocation, setLoadingLocation] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const [environmentError, setEnvironmentError] = useState("");
   const locationRequestInFlight = useRef(false);
@@ -149,7 +150,8 @@ export default function App() {
       const nextCatalog = await getCameras();
       setCatalog(nextCatalog);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(catalog ? `來源暫時不穩，已保留可用資料。${message}` : message);
     } finally {
       setLoading(false);
     }
@@ -333,7 +335,8 @@ export default function App() {
     return [...cameraMatches, ...vdMatches].slice(0, 8);
   }, [catalog?.cameras, catalog?.vehicleDetectors, query, searchPlace]);
 
-  const showSearchResults = Boolean(query.trim()) && (localSearchMatches.length > 0 || placePredictions.length > 0 || placesError);
+  const showSearchResults =
+    Boolean(query.trim()) && (localSearchMatches.length > 0 || placePredictions.length > 0 || placesError || searching);
 
   function clearSearch() {
     setQuery("");
@@ -360,41 +363,50 @@ export default function App() {
   }
 
   async function selectPlacePrediction(prediction: google.maps.places.AutocompletePrediction) {
+    setSearching(true);
     try {
       const place = await getPlaceDetails(prediction.place_id);
       activatePlaceSearch(place);
     } catch (err) {
       setPlacesError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSearching(false);
     }
   }
 
   async function submitSearch() {
-    const firstLocal = localSearchMatches[0];
-    if (firstLocal?.kind === "camera") {
-      selectCamera(firstLocal.item);
-      return;
-    }
-    if (firstLocal?.kind === "vd") {
-      selectVehicleDetector(firstLocal.item);
-      return;
-    }
-
-    const firstPrediction = placePredictions[0];
-    if (firstPrediction) {
-      await selectPlacePrediction(firstPrediction);
-      return;
-    }
-
-    const keyword = query.trim();
-    if (!keyword) return;
-
+    if (searching) return;
+    setSearching(true);
     try {
+      const firstLocal = localSearchMatches[0];
+      if (firstLocal?.kind === "camera") {
+        selectCamera(firstLocal.item);
+        return;
+      }
+      if (firstLocal?.kind === "vd") {
+        selectVehicleDetector(firstLocal.item);
+        return;
+      }
+
+      const firstPrediction = placePredictions[0];
+      if (firstPrediction) {
+        const place = await getPlaceDetails(firstPrediction.place_id);
+        activatePlaceSearch(place);
+        return;
+      }
+
+      const keyword = query.trim();
+      if (!keyword) return;
+
       const prediction = (await getPlacePredictions(keyword))[0];
       if (prediction) {
-        await selectPlacePrediction(prediction);
+        const place = await getPlaceDetails(prediction.place_id);
+        activatePlaceSearch(place);
       }
     } catch (err) {
       setPlacesError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSearching(false);
     }
   }
 
@@ -448,7 +460,7 @@ export default function App() {
             <p className="eyebrow">Taiwan Live Cam</p>
             <h1>台灣即時影像</h1>
           </div>
-          <button className="icon-button" type="button" onClick={loadCameras} title="重新整理">
+          <button className="icon-button" type="button" onClick={loadCameras} title="重新整理" disabled={loading}>
             <RefreshCw size={18} />
           </button>
         </div>
@@ -469,6 +481,7 @@ export default function App() {
                   void submitSearch();
                 }
               }}
+              disabled={searching}
               placeholder="搜尋地點、商家、縣市、道路、攝影機"
               type="search"
             />
@@ -496,6 +509,7 @@ export default function App() {
                   className="search-result-item place"
                   key={prediction.place_id}
                   onClick={() => void selectPlacePrediction(prediction)}
+                  disabled={searching}
                   type="button"
                 >
                   <strong>{prediction.structured_formatting.main_text}</strong>
@@ -503,6 +517,7 @@ export default function App() {
                 </button>
               ))}
               {placesError && <div className="search-result-note">{placesError}</div>}
+              {searching && <div className="search-result-note">搜尋中...</div>}
             </div>
           )}
         </div>
@@ -515,7 +530,7 @@ export default function App() {
         />
 
         <div className="quick-actions">
-          <button className="action-button" type="button" onClick={() => requestLocation()}>
+          <button className="action-button" type="button" onClick={() => requestLocation()} disabled={loadingLocation}>
             <LocateFixed size={17} />
             {loadingLocation ? "定位中" : "附近影像"}
           </button>
