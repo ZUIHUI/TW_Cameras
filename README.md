@@ -78,7 +78,7 @@ VITE_GOOGLE_MAPS_API_KEY
 
 `TDX_CITY_CODES` defaults to `all` so the city CCTV catalog covers Taiwan. Set a comma-separated list like `Taipei,NewTaipei,Taichung` only when you want to limit TDX requests during development.
 
-`VITE_GOOGLE_MAPS_API_KEY` is a browser key for the map and Places search. Keep the real value in `.env.local` and Vercel Environment Variables, and restrict it in Google Cloud Console to Maps JavaScript API, Places API, your Vercel domain, and localhost development URLs.
+`VITE_GOOGLE_MAPS_API_KEY` is a browser key for the map, Places search, and Google Places restaurant recommendations. Keep the real value in `.env.local` and Vercel Environment Variables, and restrict it in Google Cloud Console to Maps JavaScript API, Places API / Places API (New), your Vercel domain, and localhost development URLs.
 
 `GOOGLE_GEOCODING_API_KEY` is server-side only. It is used to add coordinates to scenic live cameras when the tourism source page does not expose coordinates. Restrict it to Geocoding API usage in Google Cloud.
 
@@ -91,6 +91,8 @@ The app includes a lightweight "nearby fun" panel powered by Tourism Administrat
 - Activities: `/v2/Tourism/Activity`
 
 The local API normalizes these sources into `GET /api/nearby-tourism`, filters by distance from the selected camera, Google place, or current location, and returns up to 8 items per category. Tourism data is cached for 12 hours; nearby query results are cached briefly by coordinate bucket to reduce repeated upstream calls.
+
+The web app also uses Google Maps JavaScript Places `Place.searchNearby()` on the frontend to improve the restaurant recommendation group. Google Places restaurants are shown first when available; if Google Places is unavailable or returns no restaurants, the UI falls back to TDX Tourism restaurant data.
 
 Reference sources:
 

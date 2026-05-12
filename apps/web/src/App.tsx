@@ -16,12 +16,13 @@ import { getCameras, getEnvironment, getNearbyTourism } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
 import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
-import { GOOGLE_MAPS_API_KEY, loadGooglePlaces } from "./googleMaps";
+import { GOOGLE_MAPS_API_KEY, loadGooglePlaces, searchGoogleNearbyRestaurants } from "./googleMaps";
 import type {
   Camera,
   CameraCatalogResponse,
   CameraFilter,
   EnvironmentSummary,
+  GoogleRestaurantItem,
   NearbyTourismResponse,
   SearchPlace,
   UserLocation,
@@ -70,6 +71,9 @@ export default function App() {
   const [environmentError, setEnvironmentError] = useState("");
   const [nearbyTourismError, setNearbyTourismError] = useState("");
   const [nearbyTourismLoading, setNearbyTourismLoading] = useState(false);
+  const [googleRestaurants, setGoogleRestaurants] = useState<GoogleRestaurantItem[]>([]);
+  const [googleRestaurantsLoading, setGoogleRestaurantsLoading] = useState(false);
+  const [googleRestaurantsError, setGoogleRestaurantsError] = useState("");
   const [showSourceDetails, setShowSourceDetails] = useState(false);
   const [controlPanelSnap, setControlPanelSnap] = useState<ControlPanelSnap>("half");
   const [controlPanelDragOffset, setControlPanelDragOffset] = useState(0);
@@ -155,6 +159,33 @@ export default function App() {
       })
       .finally(() => {
         if (active) setNearbyTourismLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [nearbyTourismTarget]);
+
+  useEffect(() => {
+    setGoogleRestaurants([]);
+    setGoogleRestaurantsError("");
+
+    if (!nearbyTourismTarget || !GOOGLE_MAPS_API_KEY) {
+      setGoogleRestaurantsLoading(false);
+      return;
+    }
+
+    let active = true;
+    setGoogleRestaurantsLoading(true);
+    searchGoogleNearbyRestaurants({ lat: nearbyTourismTarget.lat, lon: nearbyTourismTarget.lon })
+      .then((items) => {
+        if (active) setGoogleRestaurants(items);
+      })
+      .catch(() => {
+        if (active) setGoogleRestaurantsError("Google 餐廳推薦暫時無法取得，已顯示可用餐飲資料。");
+      })
+      .finally(() => {
+        if (active) setGoogleRestaurantsLoading(false);
       });
 
     return () => {
@@ -781,6 +812,9 @@ export default function App() {
             tourism={nearbyTourism}
             loading={nearbyTourismLoading}
             error={nearbyTourismError}
+            googleRestaurants={googleRestaurants}
+            googleRestaurantsLoading={googleRestaurantsLoading}
+            googleRestaurantsError={googleRestaurantsError}
             title={`${nearbyTourismTarget.title}附近玩樂`}
           />
         )}
@@ -854,6 +888,9 @@ export default function App() {
           nearbyTourism={selectedCamera ? nearbyTourism : undefined}
           nearbyTourismError={selectedCamera ? nearbyTourismError : ""}
           nearbyTourismLoading={selectedCamera ? nearbyTourismLoading : false}
+          googleRestaurants={selectedCamera ? googleRestaurants : []}
+          googleRestaurantsError={selectedCamera ? googleRestaurantsError : ""}
+          googleRestaurantsLoading={selectedCamera ? googleRestaurantsLoading : false}
           isFavorite={selectedCamera ? selectedIsFavorite : false}
           onClose={() => {
             setSelectedCamera(undefined);

@@ -128,6 +128,22 @@ export interface NearbyTourismItem {
   updatedAt: string;
 }
 
+export interface GoogleRestaurantItem {
+  id: string;
+  type: "restaurant";
+  source: "Google Places";
+  title: string;
+  address: string;
+  distanceMeters: number;
+  lat: number;
+  lon: number;
+  googleMapsUrl: string;
+  rating?: number;
+  userRatingCount?: number;
+  priceLevel?: string;
+  businessStatus?: string;
+}
+
 export interface NearbyTourismResponse {
   origin: {
     lat: number;

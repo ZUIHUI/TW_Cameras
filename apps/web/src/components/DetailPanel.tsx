@@ -1,5 +1,5 @@
 import { AlertCircle, ExternalLink, Heart, ShieldCheck, Video, X } from "lucide-react";
-import type { Camera, EnvironmentSummary, NearbyTourismResponse, VehicleDetector } from "../types";
+import type { Camera, EnvironmentSummary, GoogleRestaurantItem, NearbyTourismResponse, VehicleDetector } from "../types";
 import { NearbyTourismBlock } from "./NearbyTourismBlock";
 
 interface DetailPanelProps {
@@ -10,6 +10,9 @@ interface DetailPanelProps {
   nearbyTourism?: NearbyTourismResponse;
   nearbyTourismError: string;
   nearbyTourismLoading: boolean;
+  googleRestaurants: GoogleRestaurantItem[];
+  googleRestaurantsError: string;
+  googleRestaurantsLoading: boolean;
   isFavorite: boolean;
   onClose: () => void;
   onToggleFavorite: () => void;
@@ -23,6 +26,9 @@ export function DetailPanel({
   nearbyTourism,
   nearbyTourismError,
   nearbyTourismLoading,
+  googleRestaurants,
+  googleRestaurantsError,
+  googleRestaurantsLoading,
   isFavorite,
   onClose,
   onToggleFavorite
@@ -102,6 +108,9 @@ export function DetailPanel({
           tourism={nearbyTourism}
           loading={nearbyTourismLoading}
           error={nearbyTourismError}
+          googleRestaurants={googleRestaurants}
+          googleRestaurantsLoading={googleRestaurantsLoading}
+          googleRestaurantsError={googleRestaurantsError}
           title="附近玩樂"
         />
       )}

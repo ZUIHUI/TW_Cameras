@@ -11,7 +11,8 @@
     "dev": "concurrently -n api,web -c cyan,green \"pnpm --filter @taiwan-live-cam/api dev\" \"pnpm --filter @taiwan-live-cam/web dev\"",
     "build": "pnpm --filter @taiwan-live-cam/api build && pnpm --filter @taiwan-live-cam/web build",
     "build:vercel": "vite build --config vite.config.ts",
-    "typecheck": "pnpm --filter @taiwan-live-cam/api typecheck && pnpm --filter @taiwan-live-cam/web typecheck"
+    "typecheck": "pnpm --filter @taiwan-live-cam/api typecheck && pnpm --filter @taiwan-live-cam/web typecheck",
+    "check:ui-text": "node scripts/check-ui-text.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.4.1",
