@@ -1,4 +1,4 @@
-import type { CameraCatalogResponse, EnvironmentSummary } from "./types";
+import type { CameraCatalogResponse, EnvironmentSummary, NearbyTourismResponse } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 const API_TIMEOUT_MS = 12000;
@@ -67,4 +67,13 @@ export function getCameras(): Promise<CameraCatalogResponse> {
 
 export function getEnvironment(county: string): Promise<EnvironmentSummary> {
   return fetchJson<EnvironmentSummary>(`/environment?county=${encodeURIComponent(county)}`);
+}
+
+export function getNearbyTourism(lat: number, lon: number, radius = 3000): Promise<NearbyTourismResponse> {
+  const searchParams = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lon),
+    radius: String(radius)
+  });
+  return fetchJson<NearbyTourismResponse>(`/nearby-tourism?${searchParams.toString()}`);
 }

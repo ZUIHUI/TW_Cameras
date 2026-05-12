@@ -115,6 +115,36 @@ export interface EnvironmentSummary {
   updatedAt: string;
 }
 
+export type TourismItemType = "attraction" | "restaurant" | "activity";
+
+export interface NearbyTourismItem {
+  id: string;
+  type: TourismItemType;
+  title: string;
+  description: string;
+  address: string;
+  phone: string;
+  distanceMeters: number;
+  lat: number;
+  lon: number;
+  url: string;
+  imageUrl: string;
+  updatedAt: string;
+}
+
+export interface NearbyTourismSummary {
+  origin: {
+    lat: number;
+    lon: number;
+    radiusMeters: number;
+  };
+  attractions: NearbyTourismItem[];
+  restaurants: NearbyTourismItem[];
+  activities: NearbyTourismItem[];
+  sourceErrors: SourceError[];
+  updatedAt: string;
+}
+
 export interface SourceInfo {
   id: string;
   name: string;

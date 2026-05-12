@@ -42,6 +42,7 @@ Local URLs:
 - `GET /api/health`
 - `GET /api/cameras`
 - `GET /api/cameras/:id`
+- `GET /api/nearby-tourism?lat=25.033&lon=121.5654&radius=3000`
 - `GET /api/environment?county=臺北市`
 - `GET /api/sources`
 
@@ -80,3 +81,20 @@ VITE_GOOGLE_MAPS_API_KEY
 `VITE_GOOGLE_MAPS_API_KEY` is a browser key for the map and Places search. Keep the real value in `.env.local` and Vercel Environment Variables, and restrict it in Google Cloud Console to Maps JavaScript API, Places API, your Vercel domain, and localhost development URLs.
 
 `GOOGLE_GEOCODING_API_KEY` is server-side only. It is used to add coordinates to scenic live cameras when the tourism source page does not expose coordinates. Restrict it to Geocoding API usage in Google Cloud.
+
+## Tourism Nearby Data
+
+The app includes a lightweight "nearby fun" panel powered by Tourism Administration open data through TDX Tourism APIs. It uses:
+
+- Scenic spots: `/v2/Tourism/ScenicSpot`
+- Restaurants: `/v2/Tourism/Restaurant`
+- Activities: `/v2/Tourism/Activity`
+
+The local API normalizes these sources into `GET /api/nearby-tourism`, filters by distance from the selected camera, Google place, or current location, and returns up to 8 items per category. Tourism data is cached for 12 hours; nearby query results are cached briefly by coordinate bucket to reduce repeated upstream calls.
+
+Reference sources:
+
+- Tourism Administration website nearby feature: https://www.taiwan.net.tw/m1.aspx?sNo=0000165
+- Scenic spots dataset: https://data.gov.tw/dataset/7777
+- Restaurants dataset: https://data.gov.tw/dataset/7779
+- Activities dataset: https://data.gov.tw/dataset/7778

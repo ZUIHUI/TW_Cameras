@@ -1,11 +1,15 @@
 import { AlertCircle, ExternalLink, Heart, ShieldCheck, Video, X } from "lucide-react";
-import type { Camera, EnvironmentSummary, VehicleDetector } from "../types";
+import type { Camera, EnvironmentSummary, NearbyTourismResponse, VehicleDetector } from "../types";
+import { NearbyTourismBlock } from "./NearbyTourismBlock";
 
 interface DetailPanelProps {
   camera?: Camera;
   vehicleDetector?: VehicleDetector;
   environment?: EnvironmentSummary;
   environmentError: string;
+  nearbyTourism?: NearbyTourismResponse;
+  nearbyTourismError: string;
+  nearbyTourismLoading: boolean;
   isFavorite: boolean;
   onClose: () => void;
   onToggleFavorite: () => void;
@@ -16,6 +20,9 @@ export function DetailPanel({
   vehicleDetector,
   environment,
   environmentError,
+  nearbyTourism,
+  nearbyTourismError,
+  nearbyTourismLoading,
   isFavorite,
   onClose,
   onToggleFavorite
@@ -90,6 +97,14 @@ export function DetailPanel({
       </div>
 
       {camera && <EnvironmentBlock environment={environment} error={environmentError} />}
+      {camera && (
+        <NearbyTourismBlock
+          tourism={nearbyTourism}
+          loading={nearbyTourismLoading}
+          error={nearbyTourismError}
+          title="附近玩樂"
+        />
+      )}
 
       <div className="detail-footer">
         {camera && (

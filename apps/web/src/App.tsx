@@ -12,15 +12,17 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getCameras, getEnvironment } from "./api";
+import { getCameras, getEnvironment, getNearbyTourism } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
+import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
 import { GOOGLE_MAPS_API_KEY, loadGooglePlaces } from "./googleMaps";
 import type {
   Camera,
   CameraCatalogResponse,
   CameraFilter,
   EnvironmentSummary,
+  NearbyTourismResponse,
   SearchPlace,
   UserLocation,
   VehicleDetector,
@@ -49,6 +51,7 @@ export default function App() {
   const [placePredictions, setPlacePredictions] = useState<google.maps.places.AutocompletePrediction[]>([]);
   const [placesError, setPlacesError] = useState("");
   const [environment, setEnvironment] = useState<EnvironmentSummary | undefined>();
+  const [nearbyTourism, setNearbyTourism] = useState<NearbyTourismResponse | undefined>();
   const [query, setQuery] = useState("");
   const [cameraFilter, setCameraFilter] = useState<CameraFilter>("all");
   const [focusedListFilter, setFocusedListFilter] = useState<FocusedListFilter | undefined>();
@@ -64,10 +67,28 @@ export default function App() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const [environmentError, setEnvironmentError] = useState("");
+  const [nearbyTourismError, setNearbyTourismError] = useState("");
+  const [nearbyTourismLoading, setNearbyTourismLoading] = useState(false);
+  const [showSourceDetails, setShowSourceDetails] = useState(false);
   const locationRequestInFlight = useRef(false);
   const filterBeforePlaceSearch = useRef<CameraFilter>("all");
 
   const summary = catalog?.summary;
+  const nearbyTourismTarget = useMemo(() => {
+    if (selectedCamera) {
+      return { lat: selectedCamera.lat, lon: selectedCamera.lon, title: selectedCamera.title, placement: "detail" as const };
+    }
+    if (selectedVehicleDetector) {
+      return undefined;
+    }
+    if (searchPlace) {
+      return { lat: searchPlace.lat, lon: searchPlace.lon, title: searchPlace.title, placement: "panel" as const };
+    }
+    if (cameraFilter === "nearby" && userLocation) {
+      return { lat: userLocation.lat, lon: userLocation.lon, title: "目前位置", placement: "panel" as const };
+    }
+    return undefined;
+  }, [cameraFilter, searchPlace, selectedCamera, selectedVehicleDetector, userLocation]);
 
   useEffect(() => {
     loadCameras();
@@ -108,6 +129,33 @@ export default function App() {
       active = false;
     };
   }, [selectedCamera?.county]);
+
+  useEffect(() => {
+    setNearbyTourism(undefined);
+    setNearbyTourismError("");
+
+    if (!nearbyTourismTarget) {
+      setNearbyTourismLoading(false);
+      return;
+    }
+
+    let active = true;
+    setNearbyTourismLoading(true);
+    getNearbyTourism(nearbyTourismTarget.lat, nearbyTourismTarget.lon)
+      .then((value) => {
+        if (active) setNearbyTourism(value);
+      })
+      .catch((err: unknown) => {
+        if (active) setNearbyTourismError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (active) setNearbyTourismLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [nearbyTourismTarget]);
 
   useEffect(() => {
     setVisibleCount(80);
@@ -588,7 +636,29 @@ export default function App() {
           {catalog?.sourceErrors.length ? (
             <div className={`source-health ${sourceHealth}`}>
               <AlertCircle size={16} />
-              <span>{sourceIssueText}</span>
+              <div className="source-health-content">
+                <div className="source-health-row">
+                  <span>{sourceIssueText}</span>
+                  <button
+                    className="source-health-toggle"
+                    type="button"
+                    onClick={() => setShowSourceDetails((current) => !current)}
+                  >
+                    {showSourceDetails ? "收合來源" : "查看來源"}
+                  </button>
+                </div>
+                {showSourceDetails && (
+                  <ul className="source-error-list">
+                    {catalog.sourceErrors.map((sourceError, index) => (
+                      <li key={`${sourceError.source}-${sourceError.endpoint}-${index}`}>
+                        <strong>{sourceError.source}</strong>
+                        <span>{sourceError.endpoint}</span>
+                        <small>{sourceError.message}</small>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           ) : null}
         </section>
@@ -603,7 +673,7 @@ export default function App() {
         {catalog?.cache.stale && (
           <div className="status-message warning">
             <AlertCircle size={17} />
-            <span>官方 API 暫時無法更新，目前顯示最後成功資料。</span>
+            <span>官方 API 暫時無法更新，目前使用最後成功資料。</span>
           </div>
         )}
 
@@ -616,6 +686,16 @@ export default function App() {
             <AlertCircle size={17} />
             <span>已移到「{searchPlace.title}」，附近暫無攝影機。</span>
           </div>
+        )}
+
+        {nearbyTourismTarget?.placement === "panel" && (
+          <NearbyTourismBlock
+            compact
+            tourism={nearbyTourism}
+            loading={nearbyTourismLoading}
+            error={nearbyTourismError}
+            title={`${nearbyTourismTarget.title}附近玩樂`}
+          />
         )}
 
         <div className="camera-list" aria-label="點位清單">
@@ -684,6 +764,9 @@ export default function App() {
           vehicleDetector={selectedVehicleDetector}
           environment={selectedCamera ? environment : undefined}
           environmentError={selectedCamera ? environmentError : ""}
+          nearbyTourism={selectedCamera ? nearbyTourism : undefined}
+          nearbyTourismError={selectedCamera ? nearbyTourismError : ""}
+          nearbyTourismLoading={selectedCamera ? nearbyTourismLoading : false}
           isFavorite={selectedCamera ? selectedIsFavorite : false}
           onClose={() => {
             setSelectedCamera(undefined);
@@ -914,11 +997,11 @@ function sourceHealthLabel(status: "ok" | "partial" | "unavailable") {
 
 function sourceHealthText(status: "ok" | "partial" | "unavailable", errorCount: number) {
   if (status === "partial") {
-    return `部分來源暫時無法取得，已保留成功載入資料（${errorCount} 個來源警示）。`;
+    return `部分資料來源延遲，畫面仍可正常使用（${errorCount} 個來源警示）。`;
   }
 
   if (status === "unavailable") {
-    return "等待 TDX 憑證或官方來源恢復，部署本身仍可正常開啟。";
+    return `目前主要資料來源無法取得（${errorCount} 個來源警示）。`;
   }
 
   return "來源正常。";
