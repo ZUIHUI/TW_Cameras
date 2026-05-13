@@ -633,6 +633,31 @@ h3 {
   font-size: 12px;
 }
 
+.camera-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.camera-meta small {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.camera-distance {
+  flex: 0 0 auto;
+  border: 1px solid rgba(17, 103, 77, 0.18);
+  border-radius: 6px;
+  background: #eef9f4;
+  color: #25634f;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .favorite-mark {
   color: #c18417;
 }
@@ -644,6 +669,11 @@ h3 {
   gap: 8px;
   color: #60726c;
   text-align: center;
+}
+
+.empty-state span {
+  max-width: 250px;
+  line-height: 1.45;
 }
 
 .load-more-row {

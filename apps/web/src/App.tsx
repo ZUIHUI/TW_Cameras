@@ -41,7 +41,6 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
 const favoriteStorageKey = "taiwan-live-cam:favorites";
 type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
-let startupLocationRequested = false;
 
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
@@ -100,15 +99,6 @@ export default function App() {
 
   useEffect(() => {
     loadCameras();
-  }, []);
-
-  useEffect(() => {
-    if (startupLocationRequested) {
-      return;
-    }
-
-    startupLocationRequested = true;
-    requestLocation({ silent: true });
   }, []);
 
   useEffect(() => {
@@ -250,6 +240,10 @@ export default function App() {
     if (!navigator.geolocation) {
       if (!options.silent) setError("此瀏覽器不支援定位。");
       return;
+    }
+
+    if (!options.silent) {
+      setError("");
     }
 
     locationRequestInFlight.current = true;
@@ -522,7 +516,9 @@ export default function App() {
 
   const favoriteCount = favorites.size;
   const selectedIsFavorite = selectedCamera ? favorites.has(selectedCamera.id) : false;
+  const isLocationMode = cameraFilter === "nearby" && Boolean(userLocation) && !searchPlace;
   const isFocusedList = Boolean(focusedListFilter);
+  const listDistanceOrigin = searchPlace ?? (cameraFilter === "nearby" ? userLocation : undefined);
   const visibleCameras = filteredCameras.slice(0, visibleCount);
   const vehicleDetectorLimit = visibleLayers.cameras ? Math.min(40, visibleCount) : visibleCount;
   const visibleVehicleDetectors = filteredVehicleDetectors.slice(0, vehicleDetectorLimit);
@@ -531,6 +527,11 @@ export default function App() {
   const canLoadMore =
     filteredCameras.length > visibleCameras.length ||
     (!isFocusedList && filteredVehicleDetectors.length > visibleVehicleDetectors.length);
+  const emptyStateText = getEmptyStateText({
+    cameraFilter,
+    favoriteCount,
+    hasVisibleLayer: visibleLayers.cameras || visibleLayers.vehicleDetectors
+  });
   const sourceHealth = summary?.sourceHealth.status ?? "unavailable";
   const sourceIssueText = sourceHealthText(sourceHealth, summary?.sourceHealth.errorCount ?? 0);
   const controlPanelStyle =
@@ -708,7 +709,7 @@ export default function App() {
 
         <div className="quick-actions">
           <button
-            className={cameraFilter === "nearby" ? "action-button active" : "action-button"}
+            className={isLocationMode ? "action-button active" : "action-button"}
             type="button"
             onClick={() => requestLocation()}
             disabled={loadingLocation}
@@ -836,23 +837,30 @@ export default function App() {
         )}
 
         <div className="camera-list" aria-label="點位清單">
-          {visibleLayers.cameras && visibleCameras.map((camera) => (
-            <button
-              className={camera.id === selectedCamera?.id ? "camera-item active" : "camera-item"}
-              key={camera.id}
-              onClick={() => selectCamera(camera)}
-              type="button"
-            >
-              <span className={`camera-dot ${camera.category}`} />
-              <span className="camera-copy">
-                <strong>{camera.title}</strong>
-                <small>
-                  {formatCountyTown(camera)} · {categoryLabel(camera.category)} · {camera.streamType.toUpperCase()}
-                </small>
-              </span>
-              {favorites.has(camera.id) && <Heart className="favorite-mark" size={16} fill="currentColor" />}
-            </button>
-          ))}
+          {visibleLayers.cameras && visibleCameras.map((camera) => {
+            const distanceText = formatListDistance(listDistanceOrigin, camera);
+
+            return (
+              <button
+                className={camera.id === selectedCamera?.id ? "camera-item active" : "camera-item"}
+                key={camera.id}
+                onClick={() => selectCamera(camera)}
+                type="button"
+              >
+                <span className={`camera-dot ${camera.category}`} />
+                <span className="camera-copy">
+                  <strong>{camera.title}</strong>
+                  <span className="camera-meta">
+                    <small>
+                      {formatCountyTown(camera)} · {categoryLabel(camera.category)} · {camera.streamType.toUpperCase()}
+                    </small>
+                    {distanceText && <span className="camera-distance">{distanceText}</span>}
+                  </span>
+                </span>
+                {favorites.has(camera.id) && <Heart className="favorite-mark" size={16} fill="currentColor" />}
+              </button>
+            );
+          })}
 
           {!isFocusedList && visibleLayers.vehicleDetectors && visibleVehicleDetectors.length > 0 && (
             <section className="vd-list-section" aria-label="交通點位">
@@ -861,27 +869,34 @@ export default function App() {
                 <span>交通點位</span>
                 <strong>{filteredVehicleDetectors.length.toLocaleString()}</strong>
               </div>
-              {visibleVehicleDetectors.map((vehicleDetector) => (
-                <button
-                  className={vehicleDetector.id === selectedVehicleDetector?.id ? "camera-item traffic active" : "camera-item traffic"}
-                  key={vehicleDetector.id}
-                  onClick={() => selectVehicleDetector(vehicleDetector)}
-                  type="button"
-                >
-                  <span className="camera-dot traffic" />
-                  <span className="camera-copy">
-                    <strong>{vehicleDetector.title}</strong>
-                    <small>{vehicleDetector.roadName || "未標示道路"} · VD</small>
-                  </span>
-                </button>
-              ))}
+              {visibleVehicleDetectors.map((vehicleDetector) => {
+                const distanceText = formatListDistance(listDistanceOrigin, vehicleDetector);
+
+                return (
+                  <button
+                    className={vehicleDetector.id === selectedVehicleDetector?.id ? "camera-item traffic active" : "camera-item traffic"}
+                    key={vehicleDetector.id}
+                    onClick={() => selectVehicleDetector(vehicleDetector)}
+                    type="button"
+                  >
+                    <span className="camera-dot traffic" />
+                    <span className="camera-copy">
+                      <strong>{vehicleDetector.title}</strong>
+                      <span className="camera-meta">
+                        <small>{vehicleDetector.roadName || "未標示道路"} · VD</small>
+                        {distanceText && <span className="camera-distance">{distanceText}</span>}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
             </section>
           )}
 
           {!loading && !shownItemCount && (
             <div className="empty-state">
               <Video size={22} />
-              <span>{visibleLayers.cameras || visibleLayers.vehicleDetectors ? "沒有符合條件的點位。" : "請先開啟至少一個圖層。"}</span>
+              <span>{emptyStateText}</span>
             </div>
           )}
 
@@ -1081,6 +1096,28 @@ function loadFavorites(): Set<string> {
   }
 }
 
+function getEmptyStateText({
+  cameraFilter,
+  favoriteCount,
+  hasVisibleLayer
+}: {
+  cameraFilter: CameraFilter;
+  favoriteCount: number;
+  hasVisibleLayer: boolean;
+}) {
+  if (!hasVisibleLayer) {
+    return "請先開啟至少一個圖層。";
+  }
+
+  if (cameraFilter === "favorites") {
+    return favoriteCount
+      ? "收藏清單目前沒有可顯示的攝影機。"
+      : "尚未收藏攝影機。開啟任一攝影機後可按愛心加入收藏。";
+  }
+
+  return "沒有符合條件的點位。";
+}
+
 function normalize(value: string) {
   return value.toLowerCase().replaceAll("台", "臺").trim();
 }
@@ -1089,7 +1126,22 @@ function formatCountyTown(camera: Camera) {
   return [camera.county, camera.town].filter(Boolean).join(" ") || "未標示縣市";
 }
 
-function distanceKm(location: UserLocation, item: { lat: number; lon: number }) {
+function formatListDistance(origin: { lat: number; lon: number } | undefined, item: { lat: number; lon: number }) {
+  if (!origin) {
+    return "";
+  }
+
+  const km = distanceKm(origin, item);
+  if (km < 1) {
+    return `距離 ${Math.max(1, Math.round(km * 1000))} 公尺`;
+  }
+  if (km < 10) {
+    return `距離 ${km.toFixed(1)} 公里`;
+  }
+  return `距離 ${Math.round(km)} 公里`;
+}
+
+function distanceKm(location: { lat: number; lon: number }, item: { lat: number; lon: number }) {
   const earthRadiusKm = 6371;
   const dLat = toRad(item.lat - location.lat);
   const dLon = toRad(item.lon - location.lon);
