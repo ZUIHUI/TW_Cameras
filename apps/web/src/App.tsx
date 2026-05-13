@@ -41,6 +41,7 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
 const favoriteStorageKey = "taiwan-live-cam:favorites";
 type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
+let startupLocationRequested = false;
 
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
@@ -99,6 +100,15 @@ export default function App() {
 
   useEffect(() => {
     loadCameras();
+  }, []);
+
+  useEffect(() => {
+    if (startupLocationRequested) {
+      return;
+    }
+
+    startupLocationRequested = true;
+    requestLocation({ silent: true });
   }, []);
 
   useEffect(() => {
