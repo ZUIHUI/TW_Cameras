@@ -135,6 +135,37 @@ export interface RadarOverlayResponse {
   };
 }
 
+export interface RainfallStation {
+  stationId: string;
+  stationName: string;
+  county: string;
+  town: string;
+  lat: number;
+  lon: number;
+  distanceMeters: number;
+  obsTime: string;
+  rain10Min?: number;
+  rain1Hour?: number;
+  rain3Hour?: number;
+  rain24Hour?: number;
+  updatedAt: string;
+}
+
+export interface RainfallResponse {
+  origin: {
+    lat: number;
+    lon: number;
+    radiusMeters: number;
+  };
+  stations: RainfallStation[];
+  updatedAt: string;
+  cache: {
+    updatedAt: string;
+    stale: boolean;
+    error?: string;
+  };
+}
+
 export type TourismItemType = "attraction" | "restaurant" | "activity";
 
 export interface NearbyTourismItem {

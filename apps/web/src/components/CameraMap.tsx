@@ -6,7 +6,6 @@ import type { Camera, RadarOverlayResponse, SearchPlace, VehicleDetector } from 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
 const USER_LOCATION_RADIUS_METERS = 500;
 const VIEWPORT_PADDING_RATIO = 0.35;
-const RADAR_OVERLAY_OPACITY = 0.68;
 
 const markerColors: Record<Camera["category"] | "traffic", string> = {
   freeway: "#0e6b52",
@@ -22,6 +21,7 @@ interface CameraMapProps {
   selectedCamera?: Camera;
   selectedVehicleDetector?: VehicleDetector;
   radarOverlay?: RadarOverlayResponse;
+  radarOpacity?: number;
   searchPlace?: SearchPlace;
   userLocation?: { lat: number; lon: number };
   userLocationFocusRequest?: number;
@@ -47,6 +47,7 @@ export function CameraMap({
   selectedCamera,
   selectedVehicleDetector,
   radarOverlay,
+  radarOpacity = 0.68,
   searchPlace,
   userLocation,
   userLocationFocusRequest,
@@ -338,7 +339,7 @@ export function CameraMap({
       },
       {
         clickable: false,
-        opacity: RADAR_OVERLAY_OPACITY
+        opacity: radarOpacity
       }
     );
     radarOverlayRef.current.setMap(map);
@@ -347,7 +348,7 @@ export function CameraMap({
       radarOverlayRef.current?.setMap(null);
       radarOverlayRef.current = undefined;
     };
-  }, [map, radarOverlay?.imageUrl]);
+  }, [map, radarOpacity, radarOverlay?.bounds.east, radarOverlay?.bounds.north, radarOverlay?.bounds.south, radarOverlay?.bounds.west, radarOverlay?.imageUrl]);
 
   useEffect(() => {
     if (!map) return;

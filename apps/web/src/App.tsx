@@ -13,7 +13,7 @@ import {
   X
 } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { getCameras, getEnvironment, getNearbyTourism, getRadarOverlay } from "./api";
+import { getCameras, getEnvironment, getNearbyTourism, getRadarOverlay, getRainfallNearby } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
 import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
@@ -26,6 +26,7 @@ import type {
   GoogleRestaurantItem,
   NearbyTourismResponse,
   RadarOverlayResponse,
+  RainfallResponse,
   SearchPlace,
   UserLocation,
   VehicleDetector,
@@ -43,6 +44,7 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
 const favoriteStorageKey = "taiwan-live-cam:favorites";
 type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
+type ObservationTarget = { lat: number; lon: number; title: string };
 let startupLocationRequested = false;
 
 export default function App() {
@@ -62,6 +64,8 @@ export default function App() {
     radar: false,
     vehicleDetectors: true
   });
+  const [rainModeActive, setRainModeActive] = useState(false);
+  const [radarOpacity, setRadarOpacity] = useState(0.68);
   const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites());
   const [userLocation, setUserLocation] = useState<UserLocation | undefined>();
   const [userLocationFocusRequest, setUserLocationFocusRequest] = useState(0);
@@ -76,6 +80,11 @@ export default function App() {
   const [radarOverlay, setRadarOverlay] = useState<RadarOverlayResponse | undefined>();
   const [radarOverlayError, setRadarOverlayError] = useState("");
   const [radarOverlayLoading, setRadarOverlayLoading] = useState(false);
+  const [rainfall, setRainfall] = useState<RainfallResponse | undefined>();
+  const [rainfallError, setRainfallError] = useState("");
+  const [rainfallLoading, setRainfallLoading] = useState(false);
+  const [rainEnvironment, setRainEnvironment] = useState<EnvironmentSummary | undefined>();
+  const [rainEnvironmentError, setRainEnvironmentError] = useState("");
   const [googleRestaurants, setGoogleRestaurants] = useState<GoogleRestaurantItem[]>([]);
   const [googleRestaurantsLoading, setGoogleRestaurantsLoading] = useState(false);
   const [googleRestaurantsError, setGoogleRestaurantsError] = useState("");
@@ -84,6 +93,7 @@ export default function App() {
   const [controlPanelDragOffset, setControlPanelDragOffset] = useState(0);
   const locationRequestInFlight = useRef(false);
   const filterBeforePlaceSearch = useRef<CameraFilter>("all");
+  const radarBeforeRainMode = useRef(false);
   const controlPanelDrag = useRef<{ startY: number; moved: boolean } | undefined>(undefined);
   const suppressPanelHandleClick = useRef(false);
 
@@ -103,6 +113,19 @@ export default function App() {
     }
     return undefined;
   }, [cameraFilter, searchPlace, selectedCamera, selectedVehicleDetector, userLocation]);
+
+  const rainObservationTarget = useMemo<ObservationTarget | undefined>(() => {
+    if (selectedCamera) {
+      return { lat: selectedCamera.lat, lon: selectedCamera.lon, title: selectedCamera.title };
+    }
+    if (searchPlace) {
+      return { lat: searchPlace.lat, lon: searchPlace.lon, title: searchPlace.title };
+    }
+    if (userLocation) {
+      return { lat: userLocation.lat, lon: userLocation.lon, title: "目前位置" };
+    }
+    return undefined;
+  }, [searchPlace, selectedCamera, userLocation]);
 
   useEffect(() => {
     loadCameras();
@@ -202,6 +225,60 @@ export default function App() {
   }, [visibleLayers.radar]);
 
   useEffect(() => {
+    setRainfall(undefined);
+    setRainfallError("");
+
+    if (!rainModeActive || !rainObservationTarget) {
+      setRainfallLoading(false);
+      return;
+    }
+
+    let active = true;
+    setRainfallLoading(true);
+    getRainfallNearby(rainObservationTarget.lat, rainObservationTarget.lon)
+      .then((value) => {
+        if (active) setRainfall(value);
+      })
+      .catch((err: unknown) => {
+        if (active) setRainfallError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (active) setRainfallLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [rainModeActive, rainObservationTarget]);
+
+  useEffect(() => {
+    setRainEnvironment(undefined);
+    setRainEnvironmentError("");
+
+    if (!rainModeActive) {
+      return;
+    }
+
+    const county = selectedCamera?.county || rainfall?.stations[0]?.county;
+    if (!county) {
+      return;
+    }
+
+    let active = true;
+    getEnvironment(county)
+      .then((value) => {
+        if (active) setRainEnvironment(value);
+      })
+      .catch((err: unknown) => {
+        if (active) setRainEnvironmentError(err instanceof Error ? err.message : String(err));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [rainModeActive, rainfall?.stations[0]?.county, selectedCamera?.county]);
+
+  useEffect(() => {
     setGoogleRestaurants([]);
     setGoogleRestaurantsError("");
 
@@ -230,7 +307,7 @@ export default function App() {
 
   useEffect(() => {
     setVisibleCount(80);
-  }, [cameraFilter, query, visibleLayers.cameras, visibleLayers.vehicleDetectors]);
+  }, [cameraFilter, query, rainModeActive, rainObservationTarget, visibleLayers.cameras, visibleLayers.vehicleDetectors]);
 
   useEffect(() => {
     const keyword = query.trim();
@@ -276,7 +353,7 @@ export default function App() {
     }
   }
 
-  function requestLocation(options: { silent?: boolean } = {}) {
+  function requestLocation(options: { silent?: boolean; preserveFilter?: boolean } = {}) {
     if (locationRequestInFlight.current) {
       return;
     }
@@ -308,7 +385,9 @@ export default function App() {
           lat: position.coords.latitude,
           lon: position.coords.longitude
         });
-        setCameraFilter("nearby");
+        if (!options.preserveFilter) {
+          setCameraFilter("nearby");
+        }
         if (!options.silent) {
           setUserLocationFocusRequest((request) => request + 1);
         }
@@ -359,6 +438,36 @@ export default function App() {
     });
   }
 
+  function toggleRainMode() {
+    setRainModeActive((current) => {
+      const next = !current;
+
+      if (next) {
+        radarBeforeRainMode.current = visibleLayers.radar;
+        setVisibleLayers((layers) => ({
+          ...layers,
+          cameras: true,
+          radar: true,
+          vehicleDetectors: true
+        }));
+        setFocusedListFilter(undefined);
+
+        if (!rainObservationTarget && !locationRequestInFlight.current) {
+          requestLocation({ preserveFilter: true });
+        }
+      }
+
+      if (!next) {
+        setVisibleLayers((layers) => ({
+          ...layers,
+          radar: radarBeforeRainMode.current
+        }));
+      }
+
+      return next;
+    });
+  }
+
   function selectCamera(camera: Camera) {
     setSelectedCamera(camera);
     setSelectedVehicleDetector(undefined);
@@ -395,6 +504,7 @@ export default function App() {
     const allCameras = catalog?.cameras ?? [];
     const normalizedQuery = normalize(query);
     const activeLocation = searchPlace || userLocation;
+    const rainSortLocation = rainModeActive ? rainObservationTarget : undefined;
     const shouldFilterText = Boolean(normalizedQuery && !searchPlace);
 
     const filtered = allCameras.filter((camera) => {
@@ -412,14 +522,15 @@ export default function App() {
       );
     });
 
-    if (cameraFilter === "nearby" && activeLocation) {
+    const sortLocation = rainSortLocation || (cameraFilter === "nearby" ? activeLocation : undefined);
+    if (sortLocation) {
       return [...filtered]
-        .sort((a, b) => distanceKm(activeLocation, a) - distanceKm(activeLocation, b))
+        .sort((a, b) => distanceKm(sortLocation, a) - distanceKm(sortLocation, b))
         .slice(0, 160);
     }
 
     return filtered;
-  }, [catalog?.cameras, cameraFilter, favorites, query, searchPlace, userLocation, visibleLayers.cameras]);
+  }, [catalog?.cameras, cameraFilter, favorites, query, rainModeActive, rainObservationTarget, searchPlace, userLocation, visibleLayers.cameras]);
 
   const filteredVehicleDetectors = useMemo(() => {
     if (!visibleLayers.vehicleDetectors) {
@@ -429,6 +540,7 @@ export default function App() {
     const normalizedQuery = normalize(query);
     const allVehicleDetectors = catalog?.vehicleDetectors ?? [];
     const activeLocation = searchPlace || userLocation;
+    const rainSortLocation = rainModeActive ? rainObservationTarget : undefined;
     const shouldFilterText = Boolean(normalizedQuery && !searchPlace);
     const filtered = allVehicleDetectors.filter((vd) => {
       if (!shouldFilterText) return true;
@@ -438,14 +550,15 @@ export default function App() {
       );
     });
 
-    if (cameraFilter === "nearby" && activeLocation) {
+    const sortLocation = rainSortLocation || (cameraFilter === "nearby" ? activeLocation : undefined);
+    if (sortLocation) {
       return [...filtered]
-        .sort((a, b) => distanceKm(activeLocation, a) - distanceKm(activeLocation, b))
+        .sort((a, b) => distanceKm(sortLocation, a) - distanceKm(sortLocation, b))
         .slice(0, 160);
     }
 
     return filtered;
-  }, [cameraFilter, catalog?.vehicleDetectors, query, searchPlace, userLocation, visibleLayers.vehicleDetectors]);
+  }, [cameraFilter, catalog?.vehicleDetectors, query, rainModeActive, rainObservationTarget, searchPlace, userLocation, visibleLayers.vehicleDetectors]);
 
   const localSearchMatches = useMemo(() => {
     const normalizedQuery = normalize(query);
@@ -564,7 +677,9 @@ export default function App() {
   const selectedIsFavorite = selectedCamera ? favorites.has(selectedCamera.id) : false;
   const isLocationMode = cameraFilter === "nearby" && Boolean(userLocation) && !searchPlace;
   const isFocusedList = Boolean(focusedListFilter);
-  const listDistanceOrigin = searchPlace ?? (cameraFilter === "nearby" ? userLocation : undefined);
+  const listDistanceOrigin = rainModeActive ? rainObservationTarget : searchPlace ?? (cameraFilter === "nearby" ? userLocation : undefined);
+  const rainWeather = selectedCamera ? environment : rainEnvironment;
+  const rainWeatherError = selectedCamera ? environmentError : rainEnvironmentError;
   const visibleCameras = filteredCameras.slice(0, visibleCount);
   const vehicleDetectorLimit = visibleLayers.cameras ? Math.min(40, visibleCount) : visibleCount;
   const visibleVehicleDetectors = filteredVehicleDetectors.slice(0, vehicleDetectorLimit);
@@ -655,6 +770,7 @@ export default function App() {
         selectedCamera={selectedCamera}
         selectedVehicleDetector={selectedVehicleDetector}
         radarOverlay={visibleLayers.radar ? radarOverlay : undefined}
+        radarOpacity={radarOpacity}
         searchPlace={searchPlace}
         userLocation={userLocation}
         userLocationFocusRequest={userLocationFocusRequest}
@@ -765,6 +881,14 @@ export default function App() {
             {loadingLocation ? "定位中" : "附近影像"}
           </button>
           <button
+            className={rainModeActive ? "action-button active rain" : "action-button rain"}
+            type="button"
+            onClick={toggleRainMode}
+          >
+            <CloudRain size={17} />
+            雨天路況
+          </button>
+          <button
             className={cameraFilter === "favorites" ? "action-button active" : "action-button"}
             type="button"
             onClick={() => {
@@ -831,6 +955,28 @@ export default function App() {
               </span>
             </div>
           )}
+          {visibleLayers.radar && (
+            <div className="radar-controls">
+              <label className="radar-opacity-control">
+                <span>透明度</span>
+                <input
+                  aria-label="雷達回波透明度"
+                  max="0.9"
+                  min="0.25"
+                  onChange={(event) => setRadarOpacity(Number(event.target.value))}
+                  step="0.05"
+                  type="range"
+                  value={radarOpacity}
+                />
+                <strong>{Math.round(radarOpacity * 100)}%</strong>
+              </label>
+              <div className="radar-legend" aria-label="雷達回波圖例">
+                <span>弱</span>
+                <span className="radar-legend-track" />
+                <span>強</span>
+              </div>
+            </div>
+          )}
           <div className="category-stats" aria-label="CCTV 統計">
             <span>國道 {formatNumber(summary?.cameras.byCategory.freeway ?? 0)}</span>
             <span>公路 {formatNumber(summary?.cameras.byCategory.highway ?? 0)}</span>
@@ -866,6 +1012,21 @@ export default function App() {
             </div>
           ) : null}
         </section>
+
+        {rainModeActive && (
+          <RainStatusBlock
+            environment={rainWeather}
+            environmentError={rainWeatherError}
+            loadingLocation={loadingLocation}
+            rainfall={rainfall}
+            rainfallError={rainfallError}
+            rainfallLoading={rainfallLoading}
+            radar={radarOverlay}
+            radarError={radarOverlayError}
+            radarLoading={radarOverlayLoading}
+            target={rainObservationTarget}
+          />
+        )}
 
         {error && (
           <div className="status-message error">
@@ -1071,6 +1232,97 @@ function LayerToggle({
   );
 }
 
+function RainStatusBlock({
+  environment,
+  environmentError,
+  loadingLocation,
+  rainfall,
+  rainfallError,
+  rainfallLoading,
+  radar,
+  radarError,
+  radarLoading,
+  target
+}: {
+  environment?: EnvironmentSummary;
+  environmentError: string;
+  loadingLocation: boolean;
+  rainfall?: RainfallResponse;
+  rainfallError: string;
+  rainfallLoading: boolean;
+  radar?: RadarOverlayResponse;
+  radarError: string;
+  radarLoading: boolean;
+  target?: ObservationTarget;
+}) {
+  const nearestStation = rainfall?.stations[0];
+  const rainProbability = environment?.weather?.rainProbability;
+  const statusText = [
+    radar?.cache.stale ? "雷達暫存" : radar ? "雷達正常" : radarLoading ? "雷達讀取中" : "雷達待命",
+    rainfall?.cache.stale ? "雨量暫存" : rainfall ? "雨量正常" : rainfallLoading ? "雨量讀取中" : "雨量待命"
+  ].join(" · ");
+  const hasWarning = Boolean(radarError || rainfallError || environmentError || radar?.cache.stale || rainfall?.cache.stale);
+
+  return (
+    <section className="rain-status-panel" aria-label="雨天狀態">
+      <div className="panel-title">
+        <CloudRain size={17} />
+        <h3>雨天狀態</h3>
+        {target && <span className="rain-target-label">{target.title}</span>}
+      </div>
+
+      {!target && (
+        <div className="status-message warning">
+          <AlertCircle size={17} />
+          <span>{loadingLocation ? "正在取得目前位置。" : "尚未取得觀察位置。"}</span>
+        </div>
+      )}
+
+      {target && (
+        <>
+          <div className="rain-status-grid">
+            <div>
+              <span>雷達</span>
+              <strong>{radar ? formatRadarTime(radar.dateTime) : radarLoading ? "讀取中" : "不可用"}</strong>
+              <small>{radar?.cache.updatedAt ? `更新 ${formatRelativeTime(radar.cache.updatedAt)}` : "中央氣象署"}</small>
+            </div>
+            <div>
+              <span>最近雨量站</span>
+              <strong>{nearestStation ? nearestStation.stationName : rainfallLoading ? "讀取中" : "無資料"}</strong>
+              <small>{nearestStation ? formatListDistance(target, nearestStation) : formatDistanceMeters(rainfall?.origin.radiusMeters)}</small>
+            </div>
+            <div>
+              <span>1 小時雨量</span>
+              <strong>{formatRainAmount(nearestStation?.rain1Hour)}</strong>
+              <small>10 分 {formatRainAmount(nearestStation?.rain10Min)} · 3 小時 {formatRainAmount(nearestStation?.rain3Hour)}</small>
+            </div>
+            <div>
+              <span>降雨機率</span>
+              <strong>{rainProbability !== undefined ? `${rainProbability}%` : "未提供"}</strong>
+              <small>{environment?.weather?.description || "預報待更新"}</small>
+            </div>
+          </div>
+
+          {nearestStation && (
+            <div className="rainfall-station-strip" aria-label="雨量站摘要">
+              <span>{nearestStation.county}{nearestStation.town}</span>
+              <span>24 小時 {formatRainAmount(nearestStation.rain24Hour)}</span>
+              <span>{formatRadarTime(nearestStation.obsTime)}</span>
+            </div>
+          )}
+
+          <div className={hasWarning ? "rain-data-health warning" : "rain-data-health"}>
+            <span>{statusText}</span>
+            {(radarError || rainfallError || environmentError) && (
+              <small>{[radarError, rainfallError, environmentError].filter(Boolean).join(" · ")}</small>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function MapLegend() {
   return (
     <div className="map-legend" aria-label="地圖圖例">
@@ -1214,6 +1466,23 @@ function formatListDistance(origin: { lat: number; lon: number } | undefined, it
     return `距離 ${km.toFixed(1)} 公里`;
   }
   return `距離 ${Math.round(km)} 公里`;
+}
+
+function formatDistanceMeters(value: number | undefined) {
+  if (value === undefined) {
+    return "";
+  }
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} 公里內`;
+  }
+  return `${Math.round(value)} 公尺內`;
+}
+
+function formatRainAmount(value: number | undefined) {
+  if (value === undefined) {
+    return "未提供";
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} mm`;
 }
 
 function radarLayerDetail(radar: RadarOverlayResponse | undefined, loading: boolean, error: string) {

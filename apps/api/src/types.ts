@@ -134,6 +134,32 @@ export interface RadarOverlay {
   updatedAt: string;
 }
 
+export interface RainfallStation {
+  stationId: string;
+  stationName: string;
+  county: string;
+  town: string;
+  lat: number;
+  lon: number;
+  distanceMeters: number;
+  obsTime: string;
+  rain10Min?: number;
+  rain1Hour?: number;
+  rain3Hour?: number;
+  rain24Hour?: number;
+  updatedAt: string;
+}
+
+export interface RainfallSummary {
+  origin: {
+    lat: number;
+    lon: number;
+    radiusMeters: number;
+  };
+  stations: RainfallStation[];
+  updatedAt: string;
+}
+
 export type TourismItemType = "attraction" | "restaurant" | "activity";
 
 export interface NearbyTourismItem {

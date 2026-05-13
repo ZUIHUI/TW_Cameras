@@ -288,6 +288,7 @@ h3 {
 }
 
 .quick-actions {
+  flex-wrap: wrap;
   justify-content: flex-start;
 }
 
@@ -332,6 +333,11 @@ h3 {
   color: #ffffff;
   background: #11674d;
   border-color: #11674d;
+}
+
+.action-button.rain.active {
+  background: #1d4f8f;
+  border-color: #1d4f8f;
 }
 
 .layer-panel {
@@ -465,6 +471,143 @@ h3 {
   border-color: #f3d78a;
   background: #fff8e6;
   color: #744b00;
+}
+
+.radar-controls {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  border: 1px solid rgba(31, 75, 58, 0.1);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 9px 10px;
+}
+
+.radar-opacity-control,
+.radar-legend,
+.rainfall-station-strip,
+.rain-data-health {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.radar-opacity-control span,
+.radar-opacity-control strong,
+.radar-legend,
+.rainfall-station-strip,
+.rain-data-health {
+  color: #60726c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.radar-opacity-control input {
+  min-width: 0;
+  flex: 1;
+  accent-color: #1d4f8f;
+}
+
+.radar-legend-track {
+  height: 10px;
+  flex: 1;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7dd3fc 0%, #22c55e 36%, #facc15 62%, #ef4444 82%, #a855f7 100%);
+}
+
+.rain-status-panel {
+  border: 1px solid rgba(29, 78, 216, 0.14);
+  border-radius: 8px;
+  background: #f4f8ff;
+  padding: 12px;
+}
+
+.rain-status-panel .panel-title {
+  margin-bottom: 10px;
+}
+
+.rain-target-label {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: #52677f;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rain-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rain-status-grid div {
+  min-width: 0;
+  border: 1px solid rgba(29, 78, 216, 0.1);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.rain-status-grid span {
+  display: block;
+  color: #60726c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rain-status-grid strong {
+  display: block;
+  margin-top: 5px;
+  color: #14251f;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.rain-status-grid small {
+  display: block;
+  margin-top: 5px;
+  color: #65766f;
+  line-height: 1.35;
+}
+
+.rainfall-station-strip {
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+
+.rainfall-station-strip span {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(29, 78, 216, 0.12);
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 0 8px;
+}
+
+.rain-data-health {
+  justify-content: space-between;
+  margin-top: 9px;
+  border-radius: 7px;
+  background: #e9f7ef;
+  color: #25634f;
+  padding: 7px 9px;
+  line-height: 1.35;
+}
+
+.rain-data-health.warning {
+  align-items: flex-start;
+  flex-direction: column;
+  background: #fff8e6;
+  color: #744b00;
+}
+
+.rain-data-health small {
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .source-health {
@@ -1245,7 +1388,8 @@ h3 {
   }
 
   .fact-grid,
-  .environment-grid {
+  .environment-grid,
+  .rain-status-grid {
     grid-template-columns: 1fr;
   }
 }

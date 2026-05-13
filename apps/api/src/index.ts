@@ -4,6 +4,7 @@ import { getCameraCatalog } from "./adapters/cameras.js";
 import { getEnvironmentSummary } from "./adapters/environment.js";
 import { getNearbyTourismSummary, parseNearbyTourismQuery } from "./adapters/nearbyTourism.js";
 import { getRadarOverlay } from "./adapters/radar.js";
+import { getNearbyRainfallSummary, parseRainfallQuery } from "./adapters/rainfall.js";
 import { config } from "./config.js";
 import { UpstreamError } from "./http.js";
 import { sources } from "./sources.js";
@@ -75,6 +76,23 @@ app.get("/api/radar", async () => {
       updatedAt: radar.updatedAt,
       stale: radar.stale,
       error: radar.error
+    }
+  };
+});
+
+app.get<{ Querystring: { lat?: string; lon?: string; radius?: string; limit?: string } }>("/api/rainfall", async (request, reply) => {
+  const query = parseRainfallQuery(request.query);
+  if (!query.ok) {
+    return reply.code(400).send({ error: "invalid_query", message: query.message });
+  }
+
+  const rainfall = await getNearbyRainfallSummary(query.value);
+  return {
+    ...rainfall.value,
+    cache: {
+      updatedAt: rainfall.updatedAt,
+      stale: rainfall.stale,
+      error: rainfall.error
     }
   };
 });

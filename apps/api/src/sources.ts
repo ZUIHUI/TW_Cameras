@@ -18,6 +18,22 @@ export const sources: SourceInfo[] = [
     notes: "使用縣市天氣預報做攝影機詳情的輔助資訊。"
   },
   {
+    id: "cwa-rainfall",
+    name: "中央氣象署自動雨量站資料",
+    url: "https://opendata.cwa.gov.tw/dataset/all/O-A0002-001",
+    licenseUrl: "https://data.gov.tw/license",
+    cadence: "約 10 分鐘",
+    notes: "雨天路況模式用最近雨量站顯示短時累積雨量。"
+  },
+  {
+    id: "cwa-radar",
+    name: "中央氣象署雷達整合回波透明圖層",
+    url: "https://opendata.cwa.gov.tw/dataset/observation/O-A0058-006",
+    licenseUrl: "https://data.gov.tw/license",
+    cadence: "約 10 分鐘",
+    notes: "以透明圖層疊在地圖上，提供雨區視覺判斷。"
+  },
+  {
     id: "moenv-aqi",
     name: "環境部空氣品質指標 AQI",
     url: "https://data.moenv.gov.tw/dataset/detail/AQX_P_432",

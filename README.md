@@ -45,6 +45,7 @@ Local URLs:
 - `GET /api/nearby-tourism?lat=25.033&lon=121.5654&radius=3000`
 - `GET /api/environment?county=臺北市`
 - `GET /api/radar`
+- `GET /api/rainfall?lat=25.033&lon=121.5654&radius=15000&limit=8`
 - `GET /api/sources`
 
 ## Vercel Deployment
@@ -88,6 +89,12 @@ VITE_GOOGLE_MAPS_API_KEY
 The map can show the latest CWA radar echo as a Google Maps overlay. `GET /api/radar` reads the CWA OpenData file API dataset `O-A0058-006`, normalizes the transparent radar image URL and geographic bounds, and caches the metadata briefly.
 
 The radar layer uses the existing server-side `CWA_API_KEY`. It is optional in the UI; if the key or upstream data is unavailable, camera and nearby tourism features continue to work.
+
+## Rainy Traffic Mode
+
+The web app includes a rainy traffic mode that turns on the radar overlay, keeps CCTV and VD layers visible, sorts the camera list around the current observation point, and shows nearby CWA rainfall station readings. `GET /api/rainfall` uses the CWA OpenData dataset `O-A0002-001` with the existing `CWA_API_KEY`; it returns the nearest stations with 10-minute, 1-hour, 3-hour, and 24-hour rainfall totals.
+
+If CWA rainfall or radar data is unavailable, the rainy status panel degrades to a warning state without blocking the camera map, favorites, nearby search, or tourism recommendations.
 
 ## Tourism Nearby Data
 
