@@ -115,6 +115,25 @@ export interface EnvironmentSummary {
   updatedAt: string;
 }
 
+export interface RadarOverlay {
+  datasetId: string;
+  title: string;
+  imageUrl: string;
+  mimeType: string;
+  dateTime: string;
+  bounds: {
+    north: number;
+    south: number;
+    east: number;
+    west: number;
+  };
+  imageDimension?: {
+    width: number;
+    height: number;
+  };
+  updatedAt: string;
+}
+
 export type TourismItemType = "attraction" | "restaurant" | "activity";
 
 export interface NearbyTourismItem {

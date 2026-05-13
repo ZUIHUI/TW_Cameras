@@ -1,11 +1,12 @@
 import { MarkerClusterer, SuperClusterViewportAlgorithm } from "@googlemaps/markerclusterer";
 import { useEffect, useRef, useState } from "react";
 import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
-import type { Camera, SearchPlace, VehicleDetector } from "../types";
+import type { Camera, RadarOverlayResponse, SearchPlace, VehicleDetector } from "../types";
 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
 const USER_LOCATION_RADIUS_METERS = 500;
 const VIEWPORT_PADDING_RATIO = 0.35;
+const RADAR_OVERLAY_OPACITY = 0.68;
 
 const markerColors: Record<Camera["category"] | "traffic", string> = {
   freeway: "#0e6b52",
@@ -20,6 +21,7 @@ interface CameraMapProps {
   vehicleDetectors?: VehicleDetector[];
   selectedCamera?: Camera;
   selectedVehicleDetector?: VehicleDetector;
+  radarOverlay?: RadarOverlayResponse;
   searchPlace?: SearchPlace;
   userLocation?: { lat: number; lon: number };
   userLocationFocusRequest?: number;
@@ -44,6 +46,7 @@ export function CameraMap({
   vehicleDetectors = [],
   selectedCamera,
   selectedVehicleDetector,
+  radarOverlay,
   searchPlace,
   userLocation,
   userLocationFocusRequest,
@@ -57,6 +60,7 @@ export function CameraMap({
   const markerDataRef = useRef<Map<string, MarkerData>>(new Map());
   const renderedMarkerKeysRef = useRef<Set<string>>(new Set());
   const circleRef = useRef<google.maps.Circle | undefined>(undefined);
+  const radarOverlayRef = useRef<google.maps.GroundOverlay | undefined>(undefined);
   const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const onSelectCameraRef = useRef(onSelectCamera);
   const onSelectVehicleDetectorRef = useRef(onSelectVehicleDetector);
@@ -314,6 +318,36 @@ export function CameraMap({
     vehicleDetectors,
     viewportBounds
   ]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    radarOverlayRef.current?.setMap(null);
+    radarOverlayRef.current = undefined;
+    if (!radarOverlay) {
+      return;
+    }
+
+    radarOverlayRef.current = new google.maps.GroundOverlay(
+      radarOverlay.imageUrl,
+      {
+        east: radarOverlay.bounds.east,
+        north: radarOverlay.bounds.north,
+        south: radarOverlay.bounds.south,
+        west: radarOverlay.bounds.west
+      },
+      {
+        clickable: false,
+        opacity: RADAR_OVERLAY_OPACITY
+      }
+    );
+    radarOverlayRef.current.setMap(map);
+
+    return () => {
+      radarOverlayRef.current?.setMap(null);
+      radarOverlayRef.current = undefined;
+    };
+  }, [map, radarOverlay?.imageUrl]);
 
   useEffect(() => {
     if (!map) return;

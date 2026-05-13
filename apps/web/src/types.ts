@@ -111,6 +111,30 @@ export interface EnvironmentSummary {
   updatedAt: string;
 }
 
+export interface RadarOverlayResponse {
+  datasetId: string;
+  title: string;
+  imageUrl: string;
+  mimeType: string;
+  dateTime: string;
+  bounds: {
+    north: number;
+    south: number;
+    east: number;
+    west: number;
+  };
+  imageDimension?: {
+    width: number;
+    height: number;
+  };
+  updatedAt: string;
+  cache: {
+    updatedAt: string;
+    stale: boolean;
+    error?: string;
+  };
+}
+
 export type TourismItemType = "attraction" | "restaurant" | "activity";
 
 export interface NearbyTourismItem {
@@ -179,5 +203,6 @@ export type CameraFilter = "all" | "nearby" | CameraCategory | "favorites";
 
 export interface VisibleLayers {
   cameras: boolean;
+  radar: boolean;
   vehicleDetectors: boolean;
 }

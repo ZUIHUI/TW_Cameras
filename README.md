@@ -44,6 +44,7 @@ Local URLs:
 - `GET /api/cameras/:id`
 - `GET /api/nearby-tourism?lat=25.033&lon=121.5654&radius=3000`
 - `GET /api/environment?county=臺北市`
+- `GET /api/radar`
 - `GET /api/sources`
 
 ## Vercel Deployment
@@ -81,6 +82,12 @@ VITE_GOOGLE_MAPS_API_KEY
 `VITE_GOOGLE_MAPS_API_KEY` is a browser key for the map, Places search, and Google Places restaurant recommendations. Keep the real value in `.env.local` and Vercel Environment Variables, and restrict it in Google Cloud Console to Maps JavaScript API, Places API / Places API (New), your Vercel domain, and localhost development URLs.
 
 `GOOGLE_GEOCODING_API_KEY` is server-side only. It is used to add coordinates to scenic live cameras when the tourism source page does not expose coordinates. Restrict it to Geocoding API usage in Google Cloud.
+
+## Radar Overlay
+
+The map can show the latest CWA radar echo as a Google Maps overlay. `GET /api/radar` reads the CWA OpenData file API dataset `O-A0058-006`, normalizes the transparent radar image URL and geographic bounds, and caches the metadata briefly.
+
+The radar layer uses the existing server-side `CWA_API_KEY`. It is optional in the UI; if the key or upstream data is unavailable, camera and nearby tourism features continue to work.
 
 ## Tourism Nearby Data
 

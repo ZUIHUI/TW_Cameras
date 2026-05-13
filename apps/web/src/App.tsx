@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertCircle,
+  CloudRain,
   ExternalLink,
   Heart,
   Layers,
@@ -11,8 +12,8 @@ import {
   Video,
   X
 } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { getCameras, getEnvironment, getNearbyTourism } from "./api";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { getCameras, getEnvironment, getNearbyTourism, getRadarOverlay } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
 import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
@@ -24,6 +25,7 @@ import type {
   EnvironmentSummary,
   GoogleRestaurantItem,
   NearbyTourismResponse,
+  RadarOverlayResponse,
   SearchPlace,
   UserLocation,
   VehicleDetector,
@@ -57,6 +59,7 @@ export default function App() {
   const [focusedListFilter, setFocusedListFilter] = useState<FocusedListFilter | undefined>();
   const [visibleLayers, setVisibleLayers] = useState<VisibleLayers>({
     cameras: true,
+    radar: false,
     vehicleDetectors: true
   });
   const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites());
@@ -70,6 +73,9 @@ export default function App() {
   const [environmentError, setEnvironmentError] = useState("");
   const [nearbyTourismError, setNearbyTourismError] = useState("");
   const [nearbyTourismLoading, setNearbyTourismLoading] = useState(false);
+  const [radarOverlay, setRadarOverlay] = useState<RadarOverlayResponse | undefined>();
+  const [radarOverlayError, setRadarOverlayError] = useState("");
+  const [radarOverlayLoading, setRadarOverlayLoading] = useState(false);
   const [googleRestaurants, setGoogleRestaurants] = useState<GoogleRestaurantItem[]>([]);
   const [googleRestaurantsLoading, setGoogleRestaurantsLoading] = useState(false);
   const [googleRestaurantsError, setGoogleRestaurantsError] = useState("");
@@ -164,6 +170,36 @@ export default function App() {
       active = false;
     };
   }, [nearbyTourismTarget]);
+
+  useEffect(() => {
+    setRadarOverlayError("");
+
+    if (!visibleLayers.radar) {
+      setRadarOverlay(undefined);
+      setRadarOverlayLoading(false);
+      return;
+    }
+
+    let active = true;
+    setRadarOverlayLoading(true);
+    getRadarOverlay()
+      .then((value) => {
+        if (active) setRadarOverlay(value);
+      })
+      .catch((err: unknown) => {
+        if (active) {
+          setRadarOverlay(undefined);
+          setRadarOverlayError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (active) setRadarOverlayLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [visibleLayers.radar]);
 
   useEffect(() => {
     setGoogleRestaurants([]);
@@ -618,6 +654,7 @@ export default function App() {
         vehicleDetectors={isFocusedList ? [] : filteredVehicleDetectors}
         selectedCamera={selectedCamera}
         selectedVehicleDetector={selectedVehicleDetector}
+        radarOverlay={visibleLayers.radar ? radarOverlay : undefined}
         searchPlace={searchPlace}
         userLocation={userLocation}
         userLocationFocusRequest={userLocationFocusRequest}
@@ -771,7 +808,29 @@ export default function App() {
               label="車輛偵測器"
               onToggle={() => toggleLayer("vehicleDetectors")}
             />
+            <LayerToggle
+              checked={visibleLayers.radar}
+              detail={radarLayerDetail(radarOverlay, radarOverlayLoading, radarOverlayError)}
+              icon={<CloudRain size={16} />}
+              label="雷達回波"
+              onToggle={() => toggleLayer("radar")}
+            />
           </div>
+          {visibleLayers.radar && radarOverlayError && (
+            <div className="radar-status warning">
+              <AlertCircle size={15} />
+              <span>雷達回波暫時無法取得：{radarOverlayError}</span>
+            </div>
+          )}
+          {visibleLayers.radar && radarOverlay && !radarOverlayError && (
+            <div className={radarOverlay.cache.stale ? "radar-status warning" : "radar-status"}>
+              <CloudRain size={15} />
+              <span>
+                雷達時間 {formatRadarTime(radarOverlay.dateTime)}
+                {radarOverlay.cache.stale ? "，顯示暫存資料" : ""}
+              </span>
+            </div>
+          )}
           <div className="category-stats" aria-label="CCTV 統計">
             <span>國道 {formatNumber(summary?.cameras.byCategory.freeway ?? 0)}</span>
             <span>公路 {formatNumber(summary?.cameras.byCategory.highway ?? 0)}</span>
@@ -987,20 +1046,26 @@ function SummaryStrip({
 function LayerToggle({
   checked,
   count,
+  detail,
+  icon,
   label,
   onToggle
 }: {
   checked: boolean;
-  count: number;
+  count?: number;
+  detail?: string;
+  icon?: ReactNode;
   label: string;
   onToggle: () => void;
 }) {
   return (
     <button aria-pressed={checked} className={checked ? "layer-toggle active" : "layer-toggle"} onClick={onToggle} type="button">
-      <span className="toggle-indicator" aria-hidden="true" />
+      <span className="toggle-indicator" aria-hidden="true">
+        {icon}
+      </span>
       <span>
         <strong>{label}</strong>
-        <small>{formatNumber(count)} 點</small>
+        <small>{detail || `${formatNumber(count ?? 0)} 點`}</small>
       </span>
     </button>
   );
@@ -1149,6 +1214,28 @@ function formatListDistance(origin: { lat: number; lon: number } | undefined, it
     return `距離 ${km.toFixed(1)} 公里`;
   }
   return `距離 ${Math.round(km)} 公里`;
+}
+
+function radarLayerDetail(radar: RadarOverlayResponse | undefined, loading: boolean, error: string) {
+  if (loading) return "讀取中";
+  if (error) return "暫不可用";
+  if (radar?.cache.stale) return "暫存回波";
+  if (radar) return formatRadarTime(radar.dateTime);
+  return "最新回波";
+}
+
+function formatRadarTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value || "時間未標示";
+  }
+
+  return new Intl.DateTimeFormat("zh-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
 }
 
 function distanceKm(location: { lat: number; lon: number }, item: { lat: number; lon: number }) {

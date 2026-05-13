@@ -1,4 +1,4 @@
-import type { CameraCatalogResponse, EnvironmentSummary, NearbyTourismResponse } from "./types";
+import type { CameraCatalogResponse, EnvironmentSummary, NearbyTourismResponse, RadarOverlayResponse } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 const API_TIMEOUT_MS = 12000;
@@ -67,6 +67,10 @@ export function getCameras(): Promise<CameraCatalogResponse> {
 
 export function getEnvironment(county: string): Promise<EnvironmentSummary> {
   return fetchJson<EnvironmentSummary>(`/environment?county=${encodeURIComponent(county)}`);
+}
+
+export function getRadarOverlay(): Promise<RadarOverlayResponse> {
+  return fetchJson<RadarOverlayResponse>("/radar");
 }
 
 export function getNearbyTourism(lat: number, lon: number, radius = 3000): Promise<NearbyTourismResponse> {

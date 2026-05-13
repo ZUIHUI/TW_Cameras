@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import { getCameraCatalog } from "./adapters/cameras.js";
 import { getEnvironmentSummary } from "./adapters/environment.js";
 import { getNearbyTourismSummary, parseNearbyTourismQuery } from "./adapters/nearbyTourism.js";
+import { getRadarOverlay } from "./adapters/radar.js";
 import { config } from "./config.js";
 import { UpstreamError } from "./http.js";
 import { sources } from "./sources.js";
@@ -62,6 +63,18 @@ app.get<{ Querystring: { county?: string } }>("/api/environment", async (request
       updatedAt: summary.updatedAt,
       stale: summary.stale,
       error: summary.error
+    }
+  };
+});
+
+app.get("/api/radar", async () => {
+  const radar = await getRadarOverlay();
+  return {
+    ...radar.value,
+    cache: {
+      updatedAt: radar.updatedAt,
+      stale: radar.stale,
+      error: radar.error
     }
   };
 });
