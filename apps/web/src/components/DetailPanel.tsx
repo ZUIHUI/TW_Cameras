@@ -116,12 +116,6 @@ export function DetailPanel({
       )}
 
       <div className="detail-footer">
-        {camera && (
-          <a href={camera.sourcePageUrl || camera.streamUrl} rel="noreferrer" target="_blank">
-            <ExternalLink size={16} />
-            開啟來源
-          </a>
-        )}
         <span>
           <ShieldCheck size={15} />
           不轉存、不錄製影像
@@ -134,57 +128,74 @@ export function DetailPanel({
 function StreamPreview({ camera }: { camera: Camera }) {
   if (camera.streamType === "snapshot") {
     return (
-      <div className="stream-frame">
-        <img alt={`${camera.title} 即時影像`} src={camera.streamUrl} />
+      <div className="stream-preview">
+        <div className="stream-frame">
+          <img alt={`${camera.title} 即時影像`} src={camera.streamUrl} />
+        </div>
+        <SourceLink camera={camera} />
       </div>
     );
   }
 
   if (camera.streamType === "mjpeg" || camera.streamType === "unknown") {
     return (
-      <div className="stream-frame">
-        <img
-          alt={`${camera.title} 即時影像`}
-          onError={(event) => {
-            event.currentTarget.style.display = "none";
-          }}
-          src={camera.streamUrl}
-        />
-        <div className="stream-fallback">
-          <Video size={28} />
-          <span>若瀏覽器無法直接播放，請開啟來源檢視。</span>
+      <div className="stream-preview">
+        <div className="stream-frame">
+          <img
+            alt={`${camera.title} 即時影像`}
+            onError={(event) => {
+              event.currentTarget.style.display = "none";
+            }}
+            src={camera.streamUrl}
+          />
+          <div className="stream-fallback">
+            <Video size={28} />
+            <span>若瀏覽器無法直接播放，請開啟來源檢視。</span>
+          </div>
         </div>
+        <SourceLink camera={camera} />
       </div>
     );
   }
 
   if (camera.streamType === "webpage") {
     return (
-      <div className="stream-frame webpage">
-        <iframe
-          allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-          allowFullScreen
-          referrerPolicy="no-referrer"
-          sandbox="allow-forms allow-same-origin allow-scripts allow-presentation"
-          src={camera.streamUrl}
-          title={`${camera.title} 即時影像播放頁`}
-        />
-        <a className="stream-open-source" href={camera.sourcePageUrl || camera.streamUrl} rel="noreferrer" target="_blank">
-          <ExternalLink size={16} />
-          開啟來源
-        </a>
+      <div className="stream-preview">
+        <div className="stream-frame webpage">
+          <iframe
+            allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+            allowFullScreen
+            referrerPolicy="no-referrer"
+            sandbox="allow-forms allow-same-origin allow-scripts allow-presentation"
+            src={camera.streamUrl}
+            title={`${camera.title} 即時影像播放頁`}
+          />
+        </div>
+        <SourceLink camera={camera} />
       </div>
     );
   }
 
   return (
-    <div className="stream-frame">
-      <video controls muted playsInline preload="metadata" src={camera.streamUrl} />
-      <div className="stream-fallback">
-        <Video size={28} />
-        <span>此瀏覽器可能不支援 HLS，Safari 或 iOS 上通常可直接播放。</span>
+    <div className="stream-preview">
+      <div className="stream-frame">
+        <video controls muted playsInline preload="metadata" src={camera.streamUrl} />
+        <div className="stream-fallback">
+          <Video size={28} />
+          <span>此瀏覽器可能不支援 HLS，Safari 或 iOS 上通常可直接播放。</span>
+        </div>
       </div>
+      <SourceLink camera={camera} />
     </div>
+  );
+}
+
+function SourceLink({ camera }: { camera: Camera }) {
+  return (
+    <a className="stream-source-link" href={camera.sourcePageUrl || camera.streamUrl} rel="noreferrer" target="_blank">
+      <ExternalLink size={16} />
+      開啟來源
+    </a>
   );
 }
 

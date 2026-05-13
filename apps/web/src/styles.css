@@ -718,6 +718,11 @@ h3 {
   font-weight: 800;
 }
 
+.stream-preview {
+  display: grid;
+  gap: 10px;
+}
+
 .stream-frame {
   position: relative;
   width: 100%;
@@ -744,26 +749,21 @@ h3 {
   background: #ffffff;
 }
 
-.stream-open-source {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  z-index: 3;
+.stream-source-link {
+  justify-self: flex-start;
   min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+  border: 1px solid rgba(31, 75, 58, 0.14);
   border-radius: 8px;
-  background: rgba(14, 24, 21, 0.86);
-  color: #ffffff;
+  background: #ffffff;
   padding: 0 12px;
-  font-size: 13px;
-  font-weight: 800;
-  text-decoration: none;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
 }
 
-.stream-open-source:hover {
-  background: rgba(31, 75, 58, 0.94);
+.stream-source-link:hover {
+  border-color: rgba(31, 75, 58, 0.28);
+  background: #eef9f4;
 }
 
 .stream-fallback {
@@ -974,8 +974,8 @@ h3 {
   flex-wrap: wrap;
 }
 
-.detail-footer a,
 .detail-footer span,
+.stream-source-link,
 .source-link {
   display: inline-flex;
   align-items: center;
