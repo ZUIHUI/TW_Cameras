@@ -121,7 +121,7 @@ function TourismGroup({ items, label }: { items: NearbyTourismItem[]; label: str
 
 function TourismItemCard({ item }: { item: NearbyTourismItem | GoogleRestaurantItem }) {
   const isGoogleRestaurant = isGoogleRestaurantItem(item);
-  const mapUrl = isGoogleRestaurant ? item.googleMapsUrl : googleMapsUrl(item);
+  const link = tourismItemLink(item);
   const metadata = isGoogleRestaurant ? googleRestaurantMetadata(item) : formatDistance(item.distanceMeters);
   const description = isGoogleRestaurant ? item.address : item.description;
 
@@ -136,9 +136,9 @@ function TourismItemCard({ item }: { item: NearbyTourismItem | GoogleRestaurantI
         <small>{metadata}</small>
         {description && <p>{description}</p>}
         <div className="tourism-links">
-          <a href={mapUrl} rel="noreferrer" target="_blank">
+          <a href={link.href} rel="noreferrer" target="_blank">
             <MapPin size={14} />
-            地圖查看
+            {link.label}
           </a>
         </div>
       </div>
@@ -146,8 +146,24 @@ function TourismItemCard({ item }: { item: NearbyTourismItem | GoogleRestaurantI
   );
 }
 
+function tourismItemLink(item: NearbyTourismItem | GoogleRestaurantItem) {
+  if (isGoogleRestaurantItem(item)) {
+    return { href: item.googleMapsUrl, label: "地圖查看" };
+  }
+
+  if (item.type === "activity" && isHttpUrl(item.url)) {
+    return { href: item.url, label: "開啟活動" };
+  }
+
+  return { href: googleMapsUrl(item), label: "地圖查看" };
+}
+
 function isGoogleRestaurantItem(item: NearbyTourismItem | GoogleRestaurantItem): item is GoogleRestaurantItem {
   return "source" in item && item.source === "Google Places";
+}
+
+function isHttpUrl(value: string) {
+  return /^https?:\/\//i.test(value.trim());
 }
 
 function typeLabel(type: TourismItemType) {
