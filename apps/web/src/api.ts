@@ -75,6 +75,14 @@ export function getEnvironment(county: string): Promise<EnvironmentSummary> {
   return fetchJson<EnvironmentSummary>(`/environment?county=${encodeURIComponent(county)}`);
 }
 
+export function getEnvironmentByCoordinate(lat: number, lon: number): Promise<EnvironmentSummary> {
+  const searchParams = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lon)
+  });
+  return fetchJson<EnvironmentSummary>(`/environment/coordinate?${searchParams.toString()}`);
+}
+
 export function getRadarOverlay(): Promise<RadarOverlayResponse> {
   return fetchJson<RadarOverlayResponse>("/radar");
 }

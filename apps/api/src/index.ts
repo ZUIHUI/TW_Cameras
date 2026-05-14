@@ -1,7 +1,11 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { getCameraCatalog } from "./adapters/cameras.js";
-import { getEnvironmentSummary } from "./adapters/environment.js";
+import {
+  getEnvironmentSummary,
+  getEnvironmentSummaryByCoordinate,
+  parseCoordinateEnvironmentQuery
+} from "./adapters/environment.js";
 import { getNearbyTourismSummary, parseNearbyTourismQuery } from "./adapters/nearbyTourism.js";
 import { getRadarOverlay } from "./adapters/radar.js";
 import { getNearbyRainfallSummary, parseRainfallQuery } from "./adapters/rainfall.js";
@@ -58,6 +62,23 @@ app.get<{ Querystring: { county?: string } }>("/api/environment", async (request
   }
 
   const summary = await getEnvironmentSummary(county);
+  return {
+    ...summary.value,
+    cache: {
+      updatedAt: summary.updatedAt,
+      stale: summary.stale,
+      error: summary.error
+    }
+  };
+});
+
+app.get<{ Querystring: { lat?: string; lon?: string } }>("/api/environment/coordinate", async (request, reply) => {
+  const query = parseCoordinateEnvironmentQuery(request.query);
+  if (!query.ok) {
+    return reply.code(400).send({ error: "invalid_query", message: query.message });
+  }
+
+  const summary = await getEnvironmentSummaryByCoordinate(query.value);
   return {
     ...summary.value,
     cache: {

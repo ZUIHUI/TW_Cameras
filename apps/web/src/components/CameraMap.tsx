@@ -28,6 +28,7 @@ interface CameraMapProps {
   focusCameras?: Camera[];
   onSelectCamera: (camera: Camera) => void;
   onSelectVehicleDetector?: (vd: VehicleDetector) => void;
+  onViewportTargetChange?: (target: { lat: number; lon: number; title: string }) => void;
 }
 
 type MarkerKind = "camera" | "vd";
@@ -53,7 +54,8 @@ export function CameraMap({
   userLocationFocusRequest,
   focusCameras,
   onSelectCamera,
-  onSelectVehicleDetector
+  onSelectVehicleDetector,
+  onViewportTargetChange
 }: CameraMapProps) {
   const mapElementRef = useRef<HTMLDivElement>(null);
   const clustererRef = useRef<MarkerClusterer | undefined>(undefined);
@@ -65,12 +67,14 @@ export function CameraMap({
   const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const onSelectCameraRef = useRef(onSelectCamera);
   const onSelectVehicleDetectorRef = useRef(onSelectVehicleDetector);
+  const onViewportTargetChangeRef = useRef(onViewportTargetChange);
   const [map, setMap] = useState<google.maps.Map | undefined>();
   const [viewportBounds, setViewportBounds] = useState<google.maps.LatLngBoundsLiteral | undefined>();
   const [loadError, setLoadError] = useState("");
 
   onSelectCameraRef.current = onSelectCamera;
   onSelectVehicleDetectorRef.current = onSelectVehicleDetector;
+  onViewportTargetChangeRef.current = onViewportTargetChange;
 
   function ensureMarker({
     color,
@@ -206,9 +210,15 @@ export function CameraMap({
 
     const syncViewportBounds = () => {
       const nextBounds = map.getBounds();
-      if (!nextBounds) return;
+      const nextCenter = map.getCenter();
+      if (!nextBounds || !nextCenter) return;
 
       setViewportBounds(boundsToLiteral(nextBounds));
+      onViewportTargetChangeRef.current?.({
+        lat: nextCenter.lat(),
+        lon: nextCenter.lng(),
+        title: "目前地圖位置"
+      });
     };
 
     const listener = map.addListener("idle", syncViewportBounds);

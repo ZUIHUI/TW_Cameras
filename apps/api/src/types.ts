@@ -108,6 +108,11 @@ export interface WaterLevelSummary {
 
 export interface EnvironmentSummary {
   county: string;
+  origin?: {
+    lat: number;
+    lon: number;
+  };
+  resolvedBy?: "reverse-geocode" | "nearest-county";
   weather?: WeatherSummary;
   aqi?: AqiSummary;
   waterLevel?: WaterLevelSummary;

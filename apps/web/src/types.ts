@@ -83,6 +83,11 @@ export interface CameraCatalogResponse {
 
 export interface EnvironmentSummary {
   county: string;
+  origin?: {
+    lat: number;
+    lon: number;
+  };
+  resolvedBy?: "reverse-geocode" | "nearest-county";
   weather?: {
     county: string;
     description: string;

@@ -2,6 +2,7 @@ import {
   Activity,
   AlertCircle,
   ArrowUp,
+  CloudSun,
   CloudRain,
   Heart,
   Layers,
@@ -9,12 +10,13 @@ import {
   MapPin,
   RefreshCw,
   Search,
+  Sun,
   Star,
   Video,
   X
 } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
-import { getCameras, getEnvironment, getNearbyTourism, getRadarOverlay, getRainfallNearby } from "./api";
+import { getCameras, getEnvironment, getEnvironmentByCoordinate, getNearbyTourism, getRadarOverlay, getRainfallNearby } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
 import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
@@ -57,6 +59,7 @@ export default function App() {
   const [placePredictions, setPlacePredictions] = useState<google.maps.places.AutocompletePrediction[]>([]);
   const [placesError, setPlacesError] = useState("");
   const [environment, setEnvironment] = useState<EnvironmentSummary | undefined>();
+  const [mapEnvironment, setMapEnvironment] = useState<EnvironmentSummary | undefined>();
   const [nearbyTourism, setNearbyTourism] = useState<NearbyTourismResponse | undefined>();
   const [query, setQuery] = useState("");
   const [cameraFilter, setCameraFilter] = useState<CameraFilter>("all");
@@ -77,6 +80,8 @@ export default function App() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const [environmentError, setEnvironmentError] = useState("");
+  const [mapEnvironmentError, setMapEnvironmentError] = useState("");
+  const [mapEnvironmentLoading, setMapEnvironmentLoading] = useState(false);
   const [nearbyTourismError, setNearbyTourismError] = useState("");
   const [nearbyTourismLoading, setNearbyTourismLoading] = useState(false);
   const [radarOverlay, setRadarOverlay] = useState<RadarOverlayResponse | undefined>();
@@ -96,6 +101,8 @@ export default function App() {
   const [activeMobileSheet, setActiveMobileSheet] = useState<MobileSheet | undefined>();
   const [mobileSheetSnap, setMobileSheetSnap] = useState<ControlPanelSnap>("half");
   const [mobileSheetDragOffset, setMobileSheetDragOffset] = useState(0);
+  const [mapViewportTarget, setMapViewportTarget] = useState<ObservationTarget | undefined>();
+  const [mapDataTarget, setMapDataTarget] = useState<ObservationTarget | undefined>();
   const [showPanelTopButton, setShowPanelTopButton] = useState(false);
   const [manualRefreshKey, setManualRefreshKey] = useState(0);
   const locationRequestInFlight = useRef(false);
@@ -109,12 +116,8 @@ export default function App() {
 
   const summary = catalog?.summary;
   const nearbyTourismTarget = useMemo<ObservationTarget | undefined>(() => {
-    if (!userLocation) {
-      return undefined;
-    }
-
-    return { lat: userLocation.lat, lon: userLocation.lon, title: "目前位置" };
-  }, [userLocation]);
+    return mapDataTarget;
+  }, [mapDataTarget]);
 
   const rainObservationTarget = useMemo<ObservationTarget | undefined>(() => {
     if (selectedCamera) {
@@ -128,6 +131,7 @@ export default function App() {
     }
     return undefined;
   }, [searchPlace, selectedCamera, userLocation]);
+  const mapViewportTargetKey = mapViewportTarget ? coordinateBucket(mapViewportTarget) : "";
 
   useEffect(() => {
     loadCameras();
@@ -145,6 +149,22 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(favoriteStorageKey, JSON.stringify([...favorites]));
   }, [favorites]);
+
+  useEffect(() => {
+    if (!mapViewportTarget) {
+      setMapDataTarget(undefined);
+      return;
+    }
+
+    const nextTarget = roundedObservationTarget(mapViewportTarget);
+    const timeout = window.setTimeout(() => {
+      setMapDataTarget((current) => (coordinateBucket(current) === coordinateBucket(nextTarget) ? current : nextTarget));
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [mapViewportTargetKey]);
 
   useEffect(() => {
     const county = selectedCamera?.county;
@@ -168,6 +188,33 @@ export default function App() {
       active = false;
     };
   }, [manualRefreshKey, selectedCamera?.county]);
+
+  useEffect(() => {
+    setMapEnvironment(undefined);
+    setMapEnvironmentError("");
+
+    if (!mapDataTarget) {
+      setMapEnvironmentLoading(false);
+      return;
+    }
+
+    let active = true;
+    setMapEnvironmentLoading(true);
+    getEnvironmentByCoordinate(mapDataTarget.lat, mapDataTarget.lon)
+      .then((value) => {
+        if (active) setMapEnvironment(value);
+      })
+      .catch((err: unknown) => {
+        if (active) setMapEnvironmentError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (active) setMapEnvironmentLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [manualRefreshKey, mapDataTarget]);
 
   useEffect(() => {
     setNearbyTourism(undefined);
@@ -963,17 +1010,13 @@ export default function App() {
   }
 
   function renderMobileNearbySheet() {
-    if (!userLocation) {
+    if (!nearbyTourismTarget) {
       return (
         <div className="mobile-sheet-stack">
           <div className="status-message warning">
             <AlertCircle size={17} />
-            <span>請先取得目前定位，才能查看附近景點與餐飲。</span>
+            <span>請先移動或載入地圖，才能查看目前地圖位置附近的景點與餐飲。</span>
           </div>
-          <button className="action-button mobile-mode-button" type="button" onClick={() => requestLocation()} disabled={loadingLocation}>
-            <LocateFixed size={17} />
-            {loadingLocation ? "定位中..." : "取得定位"}
-          </button>
         </div>
       );
     }
@@ -988,7 +1031,7 @@ export default function App() {
           googleRestaurants={googleRestaurants}
           googleRestaurantsLoading={googleRestaurantsLoading}
           googleRestaurantsError={googleRestaurantsError}
-          title="目前定位附近景點與餐飲"
+          title={`${nearbyTourismTarget.title}附近景點與餐飲`}
         />
       </div>
     );
@@ -1089,13 +1132,6 @@ export default function App() {
     return (
       <div className="mobile-sheet-stack">
         {renderMobileSearchBlock()}
-        <SummaryStrip
-          cameras={summary?.cameras.total ?? 0}
-          hideCounts
-          sourceHealth={sourceHealth}
-          updatedAt={catalog?.updatedAt}
-          vehicleDetectors={summary?.vehicleDetectors.total ?? 0}
-        />
         <div className="category-row" aria-label="CCTV 分類">
           {cameraFilterOptions.map((option) => (
             <button
@@ -1298,6 +1334,7 @@ export default function App() {
         focusCameras={focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
         onSelectVehicleDetector={selectVehicleDetector}
+        onViewportTargetChange={setMapViewportTarget}
       />
 
       <aside
@@ -1582,7 +1619,7 @@ export default function App() {
           </div>
         )}
 
-        {nearbyTourismTarget && (
+        {cameraFilter === "nearby" && nearbyTourismTarget && (
           <NearbyTourismBlock
             compact
             tourism={nearbyTourism}
@@ -1777,7 +1814,12 @@ export default function App() {
         />
       )}
 
-      <MapLegend />
+      <MapHud
+        environment={mapEnvironment}
+        error={mapEnvironmentError}
+        loading={mapEnvironmentLoading}
+        target={mapDataTarget}
+      />
     </main>
   );
 }
@@ -1841,31 +1883,25 @@ function MobileContextSheet({
 
 function SummaryStrip({
   cameras,
-  hideCounts = false,
   sourceHealth,
   updatedAt,
   vehicleDetectors
 }: {
   cameras: number;
-  hideCounts?: boolean;
   sourceHealth: "ok" | "partial" | "unavailable";
   updatedAt?: string;
   vehicleDetectors: number;
 }) {
   return (
     <div className="summary-strip" aria-label="即時摘要">
-      {!hideCounts && (
-        <div>
-          <span>CCTV</span>
-          <strong>{formatNumber(cameras)}</strong>
-        </div>
-      )}
-      {!hideCounts && (
-        <div>
-          <span>VD</span>
-          <strong>{formatNumber(vehicleDetectors)}</strong>
-        </div>
-      )}
+      <div>
+        <span>CCTV</span>
+        <strong>{formatNumber(cameras)}</strong>
+      </div>
+      <div>
+        <span>VD</span>
+        <strong>{formatNumber(vehicleDetectors)}</strong>
+      </div>
       <div>
         <span>來源</span>
         <strong>{sourceHealthLabel(sourceHealth)}</strong>
@@ -1997,6 +2033,81 @@ function RainStatusBlock({
   );
 }
 
+function MapHud({
+  environment,
+  error,
+  loading,
+  target
+}: {
+  environment?: EnvironmentSummary;
+  error: string;
+  loading: boolean;
+  target?: ObservationTarget;
+}) {
+  return (
+    <div className="map-hud" aria-label="地圖資訊">
+      <MapWeatherChip environment={environment} error={error} loading={loading} target={target} />
+      <MapLegend />
+    </div>
+  );
+}
+
+function MapWeatherChip({
+  environment,
+  error,
+  loading,
+  target
+}: {
+  environment?: EnvironmentSummary;
+  error: string;
+  loading: boolean;
+  target?: ObservationTarget;
+}) {
+  if (!target) {
+    return null;
+  }
+
+  const weather = environment?.weather;
+  const hasWarning = Boolean(error);
+
+  return (
+    <div className={hasWarning ? "map-weather-chip warning" : "map-weather-chip"} title={weather?.description || error || target.title}>
+      {weatherIcon(weather)}
+      <span>{loading ? "天氣更新中" : environment?.county || target.title}</span>
+      <strong>{loading ? "..." : formatWeatherTemperature(weather)}</strong>
+      <small>{hasWarning ? "天氣暫停" : formatWeatherRain(weather)}</small>
+    </div>
+  );
+}
+
+function weatherIcon(weather?: EnvironmentSummary["weather"]) {
+  const description = weather?.description ?? "";
+  const rainProbability = weather?.rainProbability ?? 0;
+  if (rainProbability >= 50 || description.includes("雨")) {
+    return <CloudRain size={16} />;
+  }
+  if (description.includes("晴")) {
+    return <Sun size={16} />;
+  }
+  return <CloudSun size={16} />;
+}
+
+function formatWeatherTemperature(weather?: EnvironmentSummary["weather"]) {
+  const min = weather?.minTemperature;
+  const max = weather?.maxTemperature;
+  if (min !== undefined && max !== undefined) {
+    return min === max ? `${min}°C` : `${min}-${max}°C`;
+  }
+  if (min !== undefined || max !== undefined) {
+    return `${min ?? max}°C`;
+  }
+  return "--°C";
+}
+
+function formatWeatherRain(weather?: EnvironmentSummary["weather"]) {
+  return weather?.rainProbability !== undefined ? `降雨 ${weather.rainProbability}%` : "降雨 --";
+}
+
 function MapLegend() {
   return (
     <div className="map-legend" aria-label="地圖圖例">
@@ -2095,6 +2206,18 @@ function loadFavorites(): Set<string> {
   } catch {
     return new Set();
   }
+}
+
+function roundedObservationTarget(target: ObservationTarget): ObservationTarget {
+  return {
+    ...target,
+    lat: Number(target.lat.toFixed(3)),
+    lon: Number(target.lon.toFixed(3))
+  };
+}
+
+function coordinateBucket(target?: Pick<ObservationTarget, "lat" | "lon">) {
+  return target ? `${target.lat.toFixed(3)}:${target.lon.toFixed(3)}` : "";
 }
 
 function getEmptyStateText({

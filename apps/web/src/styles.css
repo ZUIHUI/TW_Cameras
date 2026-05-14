@@ -1230,20 +1230,72 @@ h3 {
   text-decoration: none;
 }
 
-.map-legend {
+.map-hud {
   position: absolute;
   right: 18px;
-  top: 64px;
+  top: 18px;
   z-index: 790;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
   max-width: min(440px, calc(100vw - 440px));
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.map-hud > * {
+  pointer-events: auto;
+}
+
+.map-weather-chip,
+.map-legend {
   border: 1px solid rgba(31, 75, 58, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.93);
-  padding: 8px 10px;
   color: #17372d;
+}
+
+.map-weather-chip {
+  max-width: 100%;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.map-weather-chip.warning {
+  border-color: #f3d78a;
+  background: #fff8e6;
+  color: #744b00;
+}
+
+.map-weather-chip span {
+  min-width: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-weather-chip strong,
+.map-weather-chip small {
+  flex: 0 0 auto;
+}
+
+.map-weather-chip small {
+  color: inherit;
+  opacity: 0.72;
+}
+
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  max-width: 100%;
+  padding: 8px 10px;
   font-size: 12px;
   font-weight: 800;
 }
@@ -1396,7 +1448,8 @@ h3 {
     right: 10px;
     bottom: calc(10px + env(safe-area-inset-bottom));
     z-index: 930;
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 6px;
     border: 1px solid rgba(31, 75, 58, 0.14);
     border-radius: 16px;
@@ -1408,7 +1461,7 @@ h3 {
 
   .mobile-nav-button {
     min-width: 0;
-    flex: 1 1 0;
+    width: 100%;
     height: 50px;
     display: grid;
     place-items: center;
@@ -1611,12 +1664,21 @@ h3 {
     padding: 14px;
   }
 
-  .map-legend {
-    left: auto;
-    right: 8px;
-    top: 52px;
-    width: max-content;
+  .map-hud {
+    left: 8px;
+    right: auto;
+    top: 8px;
     max-width: calc(100vw - 16px);
+    align-items: flex-start;
+  }
+
+  .map-weather-chip span {
+    max-width: 112px;
+  }
+
+  .map-legend {
+    width: max-content;
+    max-width: 100%;
     justify-content: flex-start;
   }
 }

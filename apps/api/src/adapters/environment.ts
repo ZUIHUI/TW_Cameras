@@ -4,14 +4,74 @@ import { fetchJson } from "../http.js";
 import type { AqiSummary, EnvironmentSummary, SourceError, WaterLevelSummary, WeatherSummary } from "../types.js";
 
 const ENVIRONMENT_TTL_MS = 45 * 60 * 1000;
+const TAIWAN_BOUNDS = {
+  maxLat: 27,
+  maxLon: 123,
+  minLat: 20,
+  minLon: 118
+};
 const WRA_WATER_LEVEL_URL =
   "https://data.wra.gov.tw/Service/OpenData.aspx?format=json&id=2D09DB8B-6A1B-485E-88B5-923A462F475C";
+type CoordinateEnvironmentQuery = { lat: number; lon: number };
+type CountyResolution = { county: string; resolvedBy: NonNullable<EnvironmentSummary["resolvedBy"]> };
+
+const countyCentroids: Array<{ county: string; lat: number; lon: number; aliases: string[] }> = [
+  { county: "基隆市", lat: 25.1276, lon: 121.7392, aliases: ["keelungcity"] },
+  { county: "臺北市", lat: 25.0375, lon: 121.5637, aliases: ["台北市", "taipeicity"] },
+  { county: "新北市", lat: 25.0169, lon: 121.4628, aliases: ["newtaipeicity"] },
+  { county: "桃園市", lat: 24.9936, lon: 121.301, aliases: ["taoyuancity"] },
+  { county: "新竹市", lat: 24.8138, lon: 120.9675, aliases: ["hsinchucity"] },
+  { county: "新竹縣", lat: 24.8387, lon: 121.0177, aliases: ["hsinchucounty"] },
+  { county: "苗栗縣", lat: 24.5602, lon: 120.8214, aliases: ["miaolicounty"] },
+  { county: "臺中市", lat: 24.1477, lon: 120.6736, aliases: ["台中市", "taichungcity"] },
+  { county: "彰化縣", lat: 24.0518, lon: 120.5161, aliases: ["changhuacounty"] },
+  { county: "南投縣", lat: 23.9609, lon: 120.9719, aliases: ["nantoucounty"] },
+  { county: "雲林縣", lat: 23.7092, lon: 120.4313, aliases: ["yunlincounty"] },
+  { county: "嘉義市", lat: 23.4801, lon: 120.4491, aliases: ["chiayicity"] },
+  { county: "嘉義縣", lat: 23.4518, lon: 120.2555, aliases: ["chiayicounty"] },
+  { county: "臺南市", lat: 22.9999, lon: 120.227, aliases: ["台南市", "tainancity"] },
+  { county: "高雄市", lat: 22.6273, lon: 120.3014, aliases: ["kaohsiungcity"] },
+  { county: "屏東縣", lat: 22.5519, lon: 120.5487, aliases: ["pingtungcounty"] },
+  { county: "宜蘭縣", lat: 24.7021, lon: 121.7378, aliases: ["yilancounty"] },
+  { county: "花蓮縣", lat: 23.9872, lon: 121.6015, aliases: ["hualiencounty"] },
+  { county: "臺東縣", lat: 22.7972, lon: 121.0714, aliases: ["台東縣", "taitungcounty"] },
+  { county: "澎湖縣", lat: 23.5711, lon: 119.5793, aliases: ["penghucounty"] },
+  { county: "金門縣", lat: 24.4368, lon: 118.3186, aliases: ["kinmencounty", "quemoycounty"] },
+  { county: "連江縣", lat: 26.1602, lon: 119.9517, aliases: ["lienchiangcounty", "matsuislands"] }
+];
 
 export async function getEnvironmentSummary(county: string) {
   const normalizedCounty = county.trim();
   return timedCache.getOrSet(`environment:${normalizedCounty}`, ENVIRONMENT_TTL_MS, () =>
     loadEnvironmentSummary(normalizedCounty)
   );
+}
+
+export function parseCoordinateEnvironmentQuery(query: { lat?: string; lon?: string }) {
+  const lat = Number(query.lat);
+  const lon = Number(query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return { ok: false as const, message: "lat and lon must be valid numbers" };
+  }
+
+  if (!isTaiwanCoordinate(lat, lon)) {
+    return { ok: false as const, message: "lat and lon must be within Taiwan bounds" };
+  }
+
+  return { ok: true as const, value: { lat, lon } };
+}
+
+export async function getEnvironmentSummaryByCoordinate(origin: CoordinateEnvironmentQuery) {
+  const resolution = await resolveCountyFromCoordinate(origin);
+  const summary = await getEnvironmentSummary(resolution.county);
+  return {
+    ...summary,
+    value: {
+      ...summary.value,
+      origin,
+      resolvedBy: resolution.resolvedBy
+    }
+  };
 }
 
 async function loadEnvironmentSummary(county: string): Promise<EnvironmentSummary> {
@@ -153,6 +213,116 @@ function assignResult<K extends "weather" | "aqi" | "waterLevel">(
     endpoint,
     message: result.reason instanceof Error ? result.reason.message : String(result.reason)
   });
+}
+
+async function resolveCountyFromCoordinate(origin: CoordinateEnvironmentQuery): Promise<CountyResolution> {
+  const bucket = `${origin.lat.toFixed(3)}:${origin.lon.toFixed(3)}`;
+  const resolution = await timedCache.getOrSet(`environment-county:${bucket}`, ENVIRONMENT_TTL_MS, () =>
+    loadCountyResolution(origin)
+  );
+  return resolution.value;
+}
+
+async function loadCountyResolution(origin: CoordinateEnvironmentQuery): Promise<CountyResolution> {
+  const county = await reverseGeocodeCounty(origin);
+  if (county) {
+    return { county, resolvedBy: "reverse-geocode" };
+  }
+
+  return { county: nearestCounty(origin), resolvedBy: "nearest-county" };
+}
+
+async function reverseGeocodeCounty(origin: CoordinateEnvironmentQuery): Promise<string | undefined> {
+  if (!config.googleGeocodingApiKey) {
+    return undefined;
+  }
+
+  const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  url.searchParams.set("latlng", `${origin.lat},${origin.lon}`);
+  url.searchParams.set("language", "zh-TW");
+  url.searchParams.set("key", config.googleGeocodingApiKey);
+
+  try {
+    const payload = await fetchJson<unknown>(url.toString(), {}, 8000);
+    return countyFromGeocodePayload(payload);
+  } catch {
+    return undefined;
+  }
+}
+
+function countyFromGeocodePayload(payload: unknown): string | undefined {
+  if (!isRecord(payload) || !Array.isArray(payload.results)) {
+    return undefined;
+  }
+
+  for (const result of payload.results) {
+    if (!isRecord(result) || !Array.isArray(result.address_components)) {
+      continue;
+    }
+
+    for (const component of result.address_components) {
+      if (!isRecord(component) || !Array.isArray(component.types)) {
+        continue;
+      }
+
+      const types = component.types.filter((type): type is string => typeof type === "string");
+      if (!types.some((type) => ["administrative_area_level_1", "administrative_area_level_2", "locality"].includes(type))) {
+        continue;
+      }
+
+      const county = normalizeCountyName(stringField(component, "long_name", "short_name"));
+      if (county) {
+        return county;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeCountyName(value: string): string | undefined {
+  const normalized = normalizeCountyText(value);
+  if (!normalized) {
+    return undefined;
+  }
+
+  for (const item of countyCentroids) {
+    if ([item.county, ...item.aliases].map(normalizeCountyText).some((alias) => alias === normalized || normalized.includes(alias))) {
+      return item.county;
+    }
+  }
+
+  return undefined;
+}
+
+function nearestCounty(origin: CoordinateEnvironmentQuery) {
+  return countyCentroids
+    .map((item) => ({ item, distance: distanceKm(origin, item) }))
+    .sort((a, b) => a.distance - b.distance)[0].item.county;
+}
+
+function distanceKm(a: CoordinateEnvironmentQuery, b: CoordinateEnvironmentQuery) {
+  const earthRadiusKm = 6371;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const value =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+function toRad(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function isTaiwanCoordinate(lat: number, lon: number) {
+  return lat >= TAIWAN_BOUNDS.minLat && lat <= TAIWAN_BOUNDS.maxLat && lon >= TAIWAN_BOUNDS.minLon && lon <= TAIWAN_BOUNDS.maxLon;
+}
+
+function normalizeCountyText(value: string) {
+  return value.replace(/台/g, "臺").replace(/\s/g, "").trim().toLowerCase();
 }
 
 function pickFirstLocation(payload: unknown): Record<string, unknown> | undefined {
