@@ -1,4 +1,4 @@
-import { AlertCircle, ExternalLink, Heart, ShieldCheck, Video, X } from "lucide-react";
+import { AlertCircle, ExternalLink, Heart, MapPin, ShieldCheck, Video, X } from "lucide-react";
 import type { Camera, EnvironmentSummary, GoogleRestaurantItem, NearbyTourismResponse, VehicleDetector } from "../types";
 import { NearbyTourismBlock } from "./NearbyTourismBlock";
 
@@ -14,7 +14,9 @@ interface DetailPanelProps {
   googleRestaurantsError: string;
   googleRestaurantsLoading: boolean;
   isFavorite: boolean;
+  nearbyRecommendationsOpen?: boolean;
   onClose: () => void;
+  onToggleNearbyRecommendations?: () => void;
   onToggleFavorite: () => void;
 }
 
@@ -30,7 +32,9 @@ export function DetailPanel({
   googleRestaurantsError,
   googleRestaurantsLoading,
   isFavorite,
+  nearbyRecommendationsOpen = false,
   onClose,
+  onToggleNearbyRecommendations,
   onToggleFavorite
 }: DetailPanelProps) {
   const item = camera || vehicleDetector;
@@ -104,15 +108,31 @@ export function DetailPanel({
 
       {camera && <EnvironmentBlock environment={environment} error={environmentError} />}
       {camera && (
-        <NearbyTourismBlock
-          tourism={nearbyTourism}
-          loading={nearbyTourismLoading}
-          error={nearbyTourismError}
-          googleRestaurants={googleRestaurants}
-          googleRestaurantsLoading={googleRestaurantsLoading}
-          googleRestaurantsError={googleRestaurantsError}
-          title="附近玩樂"
-        />
+        <div className="nearby-recommendation-frame detail-nearby-frame">
+          <button
+            className="nearby-recommendation-toggle"
+            type="button"
+            aria-expanded={nearbyRecommendationsOpen}
+            onClick={onToggleNearbyRecommendations}
+          >
+            <span>
+              <MapPin size={16} />
+              附近景點與餐飲
+            </span>
+            <strong>{nearbyRecommendationsOpen ? "收合" : "展開"}</strong>
+          </button>
+          <div className={nearbyRecommendationsOpen ? "nearby-recommendation-content open" : "nearby-recommendation-content"}>
+            <NearbyTourismBlock
+              tourism={nearbyTourism}
+              loading={nearbyTourismLoading}
+              error={nearbyTourismError}
+              googleRestaurants={googleRestaurants}
+              googleRestaurantsLoading={googleRestaurantsLoading}
+              googleRestaurantsError={googleRestaurantsError}
+              title="附近景點與餐飲"
+            />
+          </div>
+        </div>
       )}
 
       <div className="detail-footer">

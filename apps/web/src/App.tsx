@@ -7,6 +7,7 @@ import {
   Heart,
   Layers,
   LocateFixed,
+  MapPin,
   RefreshCw,
   Search,
   Star,
@@ -45,6 +46,7 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
 const favoriteStorageKey = "taiwan-live-cam:favorites";
 type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
+type MobileSheet = "search" | "layers" | "rain" | "favorites" | "detail";
 type ObservationTarget = { lat: number; lon: number; title: string };
 let startupLocationRequested = false;
 
@@ -92,13 +94,19 @@ export default function App() {
   const [showSourceDetails, setShowSourceDetails] = useState(false);
   const [controlPanelSnap, setControlPanelSnap] = useState<ControlPanelSnap>("half");
   const [controlPanelDragOffset, setControlPanelDragOffset] = useState(0);
+  const [activeMobileSheet, setActiveMobileSheet] = useState<MobileSheet | undefined>();
+  const [mobileSheetSnap, setMobileSheetSnap] = useState<ControlPanelSnap>("half");
+  const [mobileSheetDragOffset, setMobileSheetDragOffset] = useState(0);
+  const [nearbyRecommendationsOpen, setNearbyRecommendationsOpen] = useState(false);
   const [showPanelTopButton, setShowPanelTopButton] = useState(false);
   const [manualRefreshKey, setManualRefreshKey] = useState(0);
   const locationRequestInFlight = useRef(false);
   const filterBeforePlaceSearch = useRef<CameraFilter>("all");
   const radarBeforeRainMode = useRef(false);
   const controlPanelDrag = useRef<{ startY: number; moved: boolean } | undefined>(undefined);
+  const mobileSheetDrag = useRef<{ startY: number; moved: boolean } | undefined>(undefined);
   const suppressPanelHandleClick = useRef(false);
+  const suppressMobileSheetHandleClick = useRef(false);
   const controlPanelContentRef = useRef<HTMLDivElement>(null);
 
   const summary = catalog?.summary;
@@ -362,7 +370,7 @@ export default function App() {
     setManualRefreshKey((key) => key + 1);
   }
 
-  function requestLocation(options: { silent?: boolean; preserveFilter?: boolean } = {}) {
+  function requestLocation(options: { afterSuccess?: () => void; silent?: boolean; preserveFilter?: boolean } = {}) {
     if (locationRequestInFlight.current) {
       return;
     }
@@ -400,6 +408,7 @@ export default function App() {
         if (!options.silent) {
           setUserLocationFocusRequest((request) => request + 1);
         }
+        options.afterSuccess?.();
         setLoadingLocation(false);
         locationRequestInFlight.current = false;
       },
@@ -480,11 +489,14 @@ export default function App() {
   function selectCamera(camera: Camera) {
     setSelectedCamera(camera);
     setSelectedVehicleDetector(undefined);
+    setNearbyRecommendationsOpen(false);
+    setActiveMobileSheet("detail");
   }
 
   function selectVehicleDetector(vehicleDetector: VehicleDetector) {
     setSelectedVehicleDetector(vehicleDetector);
     setSelectedCamera(undefined);
+    setActiveMobileSheet("detail");
   }
 
   function selectCameraFilter(filter: CameraFilter) {
@@ -616,6 +628,9 @@ export default function App() {
     setFocusedListFilter(undefined);
     setVisibleLayers((current) => ({ ...current, cameras: true, vehicleDetectors: true }));
     setCameraFilter("nearby");
+    setNearbyRecommendationsOpen(false);
+    setActiveMobileSheet("search");
+    setMobileSheetSnap("half");
   }
 
   async function selectPlacePrediction(prediction: google.maps.places.AutocompletePrediction) {
@@ -708,6 +723,10 @@ export default function App() {
     controlPanelDragOffset !== 0
       ? ({ "--panel-drag-offset": `${controlPanelDragOffset}px` } as CSSProperties)
       : undefined;
+  const mobileSheetStyle =
+    mobileSheetDragOffset !== 0
+      ? ({ "--mobile-sheet-drag-offset": `${mobileSheetDragOffset}px` } as CSSProperties)
+      : undefined;
 
   function beginControlPanelDrag(event: PointerEvent<HTMLButtonElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) {
@@ -779,6 +798,509 @@ export default function App() {
   function scrollControlPanelToTop() {
     controlPanelContentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
+
+  function openMobileSheet(sheet: Exclude<MobileSheet, "detail">) {
+    setSelectedCamera(undefined);
+    setSelectedVehicleDetector(undefined);
+    setActiveMobileSheet(sheet);
+    setMobileSheetSnap("half");
+  }
+
+  function closeMobileSheet() {
+    setActiveMobileSheet(undefined);
+    setMobileSheetDragOffset(0);
+    setMobileSheetSnap("half");
+  }
+
+  function beginMobileSheetDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+
+    mobileSheetDrag.current = { startY: event.clientY, moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setMobileSheetDragOffset(0);
+  }
+
+  function moveMobileSheetDrag(event: PointerEvent<HTMLButtonElement>) {
+    const drag = mobileSheetDrag.current;
+    if (!drag) {
+      return;
+    }
+
+    const offset = clamp(event.clientY - drag.startY, -window.innerHeight * 0.55, window.innerHeight * 0.72);
+    drag.moved = drag.moved || Math.abs(offset) > 6;
+    setMobileSheetDragOffset(offset);
+  }
+
+  function endMobileSheetDrag(event: PointerEvent<HTMLButtonElement>) {
+    const drag = mobileSheetDrag.current;
+    if (!drag) {
+      return;
+    }
+
+    const offset = event.clientY - drag.startY;
+    const nextSnap = resolveControlPanelSnap(mobileSheetSnap, offset);
+    suppressMobileSheetHandleClick.current = drag.moved;
+    mobileSheetDrag.current = undefined;
+    setMobileSheetDragOffset(0);
+
+    if (nextSnap === "hidden") {
+      closeMobileSheet();
+    } else {
+      setMobileSheetSnap(nextSnap);
+    }
+
+    window.setTimeout(() => {
+      suppressMobileSheetHandleClick.current = false;
+    }, 0);
+  }
+
+  function cancelMobileSheetDrag() {
+    mobileSheetDrag.current = undefined;
+    setMobileSheetDragOffset(0);
+  }
+
+  function toggleMobileSheetSnap() {
+    if (suppressMobileSheetHandleClick.current) {
+      return;
+    }
+    setMobileSheetSnap((current) => (current === "full" ? "half" : "full"));
+  }
+
+  function handleMobileSheetKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setMobileSheetSnap("full");
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setMobileSheetSnap(mobileSheetSnap === "full" ? "half" : "hidden");
+      if (mobileSheetSnap !== "full") {
+        closeMobileSheet();
+      }
+    }
+  }
+
+  function openMobileLocationSearch() {
+    requestLocation({
+      afterSuccess: () => {
+        setActiveMobileSheet("search");
+        setMobileSheetSnap("half");
+        setNearbyRecommendationsOpen(true);
+      }
+    });
+  }
+
+  function openMobileFavorites() {
+    setVisibleLayers((current) => ({ ...current, cameras: true }));
+    selectCameraFilter("favorites");
+    openMobileSheet("favorites");
+  }
+
+  function mobileSheetTitle(sheet: Exclude<MobileSheet, "detail">) {
+    return {
+      search: "搜尋與點位",
+      layers: "圖層與來源",
+      rain: "雨天路況",
+      favorites: "收藏點位"
+    }[sheet];
+  }
+
+  function mobileSheetIcon(sheet: Exclude<MobileSheet, "detail">) {
+    return {
+      search: <Search size={18} />,
+      layers: <Layers size={18} />,
+      rain: <CloudRain size={18} />,
+      favorites: <Star size={18} />
+    }[sheet];
+  }
+
+  function renderMobileSearchBlock() {
+    return (
+      <div className="search-block">
+        <label className="search-box">
+          <Search size={18} />
+          <input
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              if (searchPlace) setSearchPlace(undefined);
+              if (focusedListFilter) setFocusedListFilter(undefined);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void submitSearch();
+              }
+            }}
+            disabled={searching}
+            placeholder="搜尋地點、道路或攝影機"
+            type="search"
+          />
+          {query && (
+            <button className="clear-button" type="button" onClick={clearSearch} title="清除搜尋">
+              <X size={16} />
+            </button>
+          )}
+        </label>
+        {showSearchResults && (
+          <div className="search-results" aria-label="搜尋結果">
+            {localSearchMatches.map((match) => (
+              <button
+                className="search-result-item"
+                key={`${match.kind}:${match.id}`}
+                onClick={() => (match.kind === "camera" ? selectCamera(match.item) : selectVehicleDetector(match.item))}
+                type="button"
+              >
+                <strong>{match.title}</strong>
+                <small>{match.subtitle} · {match.kind === "camera" ? "即時影像" : "交通點位"}</small>
+              </button>
+            ))}
+            {placePredictions.map((prediction) => (
+              <button
+                className="search-result-item place"
+                key={prediction.place_id}
+                onClick={() => void selectPlacePrediction(prediction)}
+                disabled={searching}
+                type="button"
+              >
+                <strong>{prediction.structured_formatting.main_text}</strong>
+                <small>{prediction.structured_formatting.secondary_text || "Google 地點"}</small>
+              </button>
+            ))}
+            {placesError && <div className="search-result-note">{placesError}</div>}
+            {searching && <div className="search-result-note">搜尋中...</div>}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderMobileNearbyRecommendations() {
+    if (nearbyTourismTarget?.placement !== "panel") {
+      return null;
+    }
+
+    return (
+      <section className="nearby-recommendation-frame mobile-nearby-card">
+        <button
+          className="nearby-recommendation-toggle"
+          type="button"
+          aria-expanded={nearbyRecommendationsOpen}
+          onClick={() => setNearbyRecommendationsOpen((current) => !current)}
+        >
+          <span>
+            <MapPin size={16} />
+            {nearbyTourismTarget.title} 附近景點與餐飲
+          </span>
+          <strong>{nearbyRecommendationsOpen ? "收合" : "展開"}</strong>
+        </button>
+        <div className={nearbyRecommendationsOpen ? "nearby-recommendation-content open" : "nearby-recommendation-content"}>
+          <NearbyTourismBlock
+            compact
+            tourism={nearbyTourism}
+            loading={nearbyTourismLoading}
+            error={nearbyTourismError}
+            googleRestaurants={googleRestaurants}
+            googleRestaurantsLoading={googleRestaurantsLoading}
+            googleRestaurantsError={googleRestaurantsError}
+            title="附近景點與餐飲"
+          />
+        </div>
+      </section>
+    );
+  }
+
+  function renderMobilePointList(options: { includeVehicleDetectors?: boolean } = {}) {
+    const includeVehicleDetectors = options.includeVehicleDetectors ?? true;
+    const showVehicleDetectorList = includeVehicleDetectors && !isFocusedList && visibleLayers.vehicleDetectors && visibleVehicleDetectors.length > 0;
+    const mobileShownItemCount = visibleCameras.length + (showVehicleDetectorList ? visibleVehicleDetectors.length : 0);
+    const mobileTotalFilteredCount = filteredCameras.length + (includeVehicleDetectors && !isFocusedList ? filteredVehicleDetectors.length : 0);
+    const mobileCanLoadMore =
+      filteredCameras.length > visibleCameras.length ||
+      (includeVehicleDetectors && !isFocusedList && filteredVehicleDetectors.length > visibleVehicleDetectors.length);
+
+    return (
+      <>
+        <div className="meta-row">
+          <span>{loading ? "載入點位中" : `${mobileShownItemCount.toLocaleString()} / ${mobileTotalFilteredCount.toLocaleString()} 個點位`}</span>
+          {catalog?.updatedAt && <span>{formatRelativeTime(catalog.updatedAt)}</span>}
+        </div>
+        <div className="camera-list mobile-point-list" aria-label="點位清單">
+          {visibleLayers.cameras && visibleCameras.map((camera) => {
+            const distanceText = formatListDistance(listDistanceOrigin, camera);
+
+            return (
+              <button
+                className={camera.id === selectedCamera?.id ? "camera-item active" : "camera-item"}
+                key={camera.id}
+                onClick={() => selectCamera(camera)}
+                type="button"
+              >
+                <span className={`camera-dot ${camera.category}`} />
+                <span className="camera-copy">
+                  <strong>{camera.title}</strong>
+                  <span className="camera-meta">
+                    <small>
+                      {formatCountyTown(camera)} · {categoryLabel(camera.category)} · {camera.streamType.toUpperCase()}
+                    </small>
+                    {distanceText && <span className="camera-distance">{distanceText}</span>}
+                  </span>
+                </span>
+                {favorites.has(camera.id) && <Heart className="favorite-mark" size={16} fill="currentColor" />}
+              </button>
+            );
+          })}
+
+          {showVehicleDetectorList && (
+            <section className="vd-list-section" aria-label="交通點位">
+              <div className="section-label">
+                <Activity size={15} />
+                <span>交通點位</span>
+                <strong>{filteredVehicleDetectors.length.toLocaleString()}</strong>
+              </div>
+              {visibleVehicleDetectors.map((vehicleDetector) => {
+                const distanceText = formatListDistance(listDistanceOrigin, vehicleDetector);
+
+                return (
+                  <button
+                    className={vehicleDetector.id === selectedVehicleDetector?.id ? "camera-item traffic active" : "camera-item traffic"}
+                    key={vehicleDetector.id}
+                    onClick={() => selectVehicleDetector(vehicleDetector)}
+                    type="button"
+                  >
+                    <span className="camera-dot traffic" />
+                    <span className="camera-copy">
+                      <strong>{vehicleDetector.title}</strong>
+                      <span className="camera-meta">
+                        <small>{vehicleDetector.roadName || "未命名道路"} · VD</small>
+                        {distanceText && <span className="camera-distance">{distanceText}</span>}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </section>
+          )}
+
+          {!loading && !mobileShownItemCount && (
+            <div className="empty-state">
+              <Video size={22} />
+              <span>{emptyStateText}</span>
+            </div>
+          )}
+
+          {mobileCanLoadMore && (
+            <div className="load-more-row">
+              <button className="action-button" type="button" onClick={() => setVisibleCount((count) => count + 80)}>
+                載入更多點位
+              </button>
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  function renderMobileSearchSheet() {
+    return (
+      <div className="mobile-sheet-stack">
+        {renderMobileSearchBlock()}
+        <SummaryStrip
+          cameras={summary?.cameras.total ?? 0}
+          sourceHealth={sourceHealth}
+          updatedAt={catalog?.updatedAt}
+          vehicleDetectors={summary?.vehicleDetectors.total ?? 0}
+        />
+        <div className="category-row" aria-label="CCTV 分類">
+          {cameraFilterOptions.map((option) => (
+            <button
+              className={option.id === cameraFilter ? "chip active" : "chip"}
+              key={option.id}
+              onClick={() => selectCameraFilter(option.id)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        {searchPlace && !shownItemCount && (
+          <div className="status-message warning">
+            <AlertCircle size={17} />
+            <span>找不到 {searchPlace.title} 附近的點位</span>
+          </div>
+        )}
+        {renderMobilePointList()}
+        {renderMobileNearbyRecommendations()}
+      </div>
+    );
+  }
+
+  function renderMobileLayerSheet() {
+    return (
+      <div className="mobile-sheet-stack">
+        <div className="layer-grid">
+          <LayerToggle
+            checked={visibleLayers.cameras}
+            count={summary?.cameras.total ?? 0}
+            label="即時影像"
+            onToggle={() => toggleLayer("cameras")}
+          />
+          <LayerToggle
+            checked={visibleLayers.vehicleDetectors}
+            count={summary?.vehicleDetectors.total ?? 0}
+            label="交通偵測"
+            onToggle={() => toggleLayer("vehicleDetectors")}
+          />
+          <LayerToggle
+            checked={visibleLayers.radar}
+            detail={radarLayerDetail(radarOverlay, radarOverlayLoading, radarOverlayError)}
+            icon={<CloudRain size={16} />}
+            label="雷達回波"
+            onToggle={() => toggleLayer("radar")}
+          />
+        </div>
+        {visibleLayers.radar && radarOverlayError && (
+          <div className="radar-status warning">
+            <AlertCircle size={15} />
+            <span>雷達回波暫時無法取得：{radarOverlayError}</span>
+          </div>
+        )}
+        {visibleLayers.radar && radarOverlay && !radarOverlayError && (
+          <div className={radarOverlay.cache.stale ? "radar-status warning" : "radar-status"}>
+            <CloudRain size={15} />
+            <span>
+              雷達時間 {formatRadarTime(radarOverlay.dateTime)}
+              {radarOverlay.cache.stale ? "，顯示暫存資料" : ""}
+            </span>
+          </div>
+        )}
+        {visibleLayers.radar && (
+          <div className="radar-controls">
+            <label className="radar-opacity-control">
+              <span>透明度</span>
+              <input
+                aria-label="雷達回波透明度"
+                max="0.9"
+                min="0.25"
+                onChange={(event) => setRadarOpacity(Number(event.target.value))}
+                step="0.05"
+                type="range"
+                value={radarOpacity}
+              />
+              <strong>{Math.round(radarOpacity * 100)}%</strong>
+            </label>
+            <div className="radar-legend" aria-label="雷達回波圖例">
+              <span>弱</span>
+              <span className="radar-legend-track" />
+              <span>強</span>
+            </div>
+          </div>
+        )}
+        <div className="category-stats" aria-label="CCTV 統計">
+          <span>國道 {formatNumber(summary?.cameras.byCategory.freeway ?? 0)}</span>
+          <span>省道 {formatNumber(summary?.cameras.byCategory.highway ?? 0)}</span>
+          <span>市區 {formatNumber(summary?.cameras.byCategory.city ?? 0)}</span>
+          <span>景點 {formatNumber(summary?.cameras.byCategory.scenic ?? 0)}</span>
+        </div>
+        {catalog?.sourceErrors.length ? (
+          <div className={`source-health ${sourceHealth}`}>
+            <AlertCircle size={16} />
+            <div className="source-health-content">
+              <div className="source-health-row">
+                <span>{sourceIssueText}</span>
+                <button
+                  className="source-health-toggle"
+                  type="button"
+                  onClick={() => setShowSourceDetails((current) => !current)}
+                >
+                  {showSourceDetails ? "收合來源" : "查看來源"}
+                </button>
+              </div>
+              {showSourceDetails && (
+                <ul className="source-error-list">
+                  {catalog.sourceErrors.map((sourceError, index) => (
+                    <li key={`${sourceError.source}-${sourceError.endpoint}-${index}`}>
+                      <strong>{sourceError.source}</strong>
+                      <span>{sourceError.endpoint}</span>
+                      <small>{sourceError.message}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderMobileRainSheet() {
+    return (
+      <div className="mobile-sheet-stack">
+        <button
+          className={rainModeActive ? "action-button active rain mobile-mode-button" : "action-button rain mobile-mode-button"}
+          type="button"
+          onClick={toggleRainMode}
+        >
+          <CloudRain size={17} />
+          {rainModeActive ? "雨天模式已開啟" : "開啟雨天模式"}
+        </button>
+        {rainModeActive ? (
+          <RainStatusBlock
+            environment={rainWeather}
+            environmentError={rainWeatherError}
+            loadingLocation={loadingLocation}
+            rainfall={rainfall}
+            rainfallError={rainfallError}
+            rainfallLoading={rainfallLoading}
+            radar={radarOverlay}
+            radarError={radarOverlayError}
+            radarLoading={radarOverlayLoading}
+            target={rainObservationTarget}
+          />
+        ) : (
+          <div className="status-message warning">
+            <AlertCircle size={17} />
+            <span>開啟後會顯示雷達、最近雨量站與降雨摘要。</span>
+          </div>
+        )}
+        {visibleLayers.radar && (
+          <div className="radar-controls">
+            <label className="radar-opacity-control">
+              <span>雷達透明度</span>
+              <input
+                aria-label="雷達回波透明度"
+                max="0.9"
+                min="0.25"
+                onChange={(event) => setRadarOpacity(Number(event.target.value))}
+                step="0.05"
+                type="range"
+                value={radarOpacity}
+              />
+              <strong>{Math.round(radarOpacity * 100)}%</strong>
+            </label>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderMobileFavoritesSheet() {
+    return (
+      <div className="mobile-sheet-stack">
+        <div className="mobile-favorites-summary">
+          <Star size={18} />
+          <span>已收藏 {favoriteCount.toLocaleString("zh-TW")} 個攝影機</span>
+        </div>
+        {renderMobilePointList({ includeVehicleDetectors: false })}
+      </div>
+    );
+  }
+
+  const activeMobileContextSheet = activeMobileSheet && activeMobileSheet !== "detail" ? activeMobileSheet : undefined;
 
   return (
     <main className="app-shell">
@@ -1178,6 +1700,77 @@ export default function App() {
         )}
       </aside>
 
+      <nav className="mobile-bottom-nav" aria-label="手機快捷操作">
+        <button
+          className={activeMobileSheet === "search" ? "mobile-nav-button active" : "mobile-nav-button"}
+          type="button"
+          onClick={() => openMobileSheet("search")}
+        >
+          <Search size={19} />
+          <span>搜尋</span>
+        </button>
+        <button
+          className={isLocationMode ? "mobile-nav-button active" : "mobile-nav-button"}
+          type="button"
+          onClick={openMobileLocationSearch}
+          disabled={loadingLocation}
+        >
+          <LocateFixed size={19} />
+          <span>定位</span>
+        </button>
+        <button
+          className={rainModeActive || activeMobileSheet === "rain" ? "mobile-nav-button active rain" : "mobile-nav-button"}
+          type="button"
+          onClick={() => {
+            setActiveMobileSheet("rain");
+            setMobileSheetSnap("half");
+            setSelectedCamera(undefined);
+            setSelectedVehicleDetector(undefined);
+          }}
+        >
+          <CloudRain size={19} />
+          <span>雨天</span>
+        </button>
+        <button
+          className={activeMobileSheet === "layers" ? "mobile-nav-button active" : "mobile-nav-button"}
+          type="button"
+          onClick={() => openMobileSheet("layers")}
+        >
+          <Layers size={19} />
+          <span>圖層</span>
+        </button>
+        <button
+          className={activeMobileSheet === "favorites" || (!activeMobileSheet && cameraFilter === "favorites") ? "mobile-nav-button active" : "mobile-nav-button"}
+          type="button"
+          onClick={openMobileFavorites}
+        >
+          <Star size={19} />
+          <span>收藏</span>
+        </button>
+      </nav>
+
+      {activeMobileContextSheet && (
+        <MobileContextSheet
+          title={mobileSheetTitle(activeMobileContextSheet)}
+          icon={mobileSheetIcon(activeMobileContextSheet)}
+          snap={mobileSheetSnap}
+          dragging={mobileSheetDragOffset !== 0}
+          style={mobileSheetStyle}
+          onClose={closeMobileSheet}
+          onToggleSnap={toggleMobileSheetSnap}
+          onKeyDown={handleMobileSheetKeyDown}
+          onPointerCancel={cancelMobileSheetDrag}
+          onPointerDown={beginMobileSheetDrag}
+          onPointerMove={moveMobileSheetDrag}
+          onPointerUp={endMobileSheetDrag}
+        >
+          {activeMobileContextSheet === "search" && renderMobileSearchSheet()}
+          {activeMobileContextSheet === "layers" && renderMobileLayerSheet()}
+          {activeMobileContextSheet === "rain" && renderMobileRainSheet()}
+          {activeMobileContextSheet === "favorites" && renderMobileFavoritesSheet()}
+        </MobileContextSheet>
+      )}
+
       {(selectedCamera || selectedVehicleDetector) && (
         <DetailPanel
           camera={selectedCamera}
@@ -1191,10 +1784,13 @@ export default function App() {
           googleRestaurantsError={selectedCamera ? googleRestaurantsError : ""}
           googleRestaurantsLoading={selectedCamera ? googleRestaurantsLoading : false}
           isFavorite={selectedCamera ? selectedIsFavorite : false}
+          nearbyRecommendationsOpen={nearbyRecommendationsOpen}
           onClose={() => {
             setSelectedCamera(undefined);
             setSelectedVehicleDetector(undefined);
+            setActiveMobileSheet(undefined);
           }}
+          onToggleNearbyRecommendations={() => setNearbyRecommendationsOpen((current) => !current)}
           onToggleFavorite={() => selectedCamera && toggleFavorite(selectedCamera.id)}
         />
       )}
@@ -1206,6 +1802,63 @@ export default function App() {
         公開資料來源
       </a>
     </main>
+  );
+}
+
+function MobileContextSheet({
+  children,
+  dragging,
+  icon,
+  onClose,
+  onKeyDown,
+  onPointerCancel,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onToggleSnap,
+  snap,
+  style,
+  title
+}: {
+  children: ReactNode;
+  dragging: boolean;
+  icon: ReactNode;
+  onClose: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  onPointerCancel: (event: PointerEvent<HTMLButtonElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
+  onPointerMove: (event: PointerEvent<HTMLButtonElement>) => void;
+  onPointerUp: (event: PointerEvent<HTMLButtonElement>) => void;
+  onToggleSnap: () => void;
+  snap: ControlPanelSnap;
+  style?: CSSProperties;
+  title: string;
+}) {
+  return (
+    <section className={`mobile-context-sheet snap-${snap}${dragging ? " dragging" : ""}`} style={style} aria-label={title}>
+      <button
+        className="mobile-sheet-handle"
+        type="button"
+        aria-expanded={snap !== "hidden"}
+        aria-label="調整底部頁高度"
+        onClick={onToggleSnap}
+        onKeyDown={onKeyDown}
+        onPointerCancel={onPointerCancel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+      />
+      <div className="mobile-sheet-header">
+        <div>
+          {icon}
+          <h2>{title}</h2>
+        </div>
+        <button className="icon-button" type="button" onClick={onClose} aria-label="關閉底部頁" title="關閉底部頁">
+          <X size={18} />
+        </button>
+      </div>
+      <div className="mobile-sheet-content">{children}</div>
+    </section>
   );
 }
 
