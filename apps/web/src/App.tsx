@@ -1234,8 +1234,8 @@ function SummaryStrip({
         <span>來源</span>
         <strong>{sourceHealthLabel(sourceHealth)}</strong>
       </div>
-      <div>
-        <span>更新</span>
+      <div title="影像清單由伺服器整理，約每 20 分鐘更新一次">
+        <span>清單更新</span>
         <strong>{updatedAt ? formatRelativeTime(updatedAt) : "尚未載入"}</strong>
       </div>
     </div>
