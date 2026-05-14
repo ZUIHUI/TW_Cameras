@@ -80,7 +80,7 @@ export function getEnvironmentByCoordinate(lat: number, lon: number): Promise<En
     lat: String(lat),
     lon: String(lon)
   });
-  return fetchJson<EnvironmentSummary>(`/environment/coordinate?${searchParams.toString()}`);
+  return fetchJson<EnvironmentSummary>(`/environment?${searchParams.toString()}`);
 }
 
 export function getRadarOverlay(): Promise<RadarOverlayResponse> {

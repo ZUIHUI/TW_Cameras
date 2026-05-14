@@ -55,7 +55,24 @@ app.get<{ Params: { id: string } }>("/api/cameras/:id", async (request, reply) =
   };
 });
 
-app.get<{ Querystring: { county?: string } }>("/api/environment", async (request, reply) => {
+app.get<{ Querystring: { county?: string; lat?: string; lon?: string } }>("/api/environment", async (request, reply) => {
+  if (request.query.lat !== undefined || request.query.lon !== undefined) {
+    const query = parseCoordinateEnvironmentQuery(request.query);
+    if (!query.ok) {
+      return reply.code(400).send({ error: "invalid_query", message: query.message });
+    }
+
+    const summary = await getEnvironmentSummaryByCoordinate(query.value);
+    return {
+      ...summary.value,
+      cache: {
+        updatedAt: summary.updatedAt,
+        stale: summary.stale,
+        error: summary.error
+      }
+    };
+  }
+
   const county = request.query.county?.trim();
   if (!county) {
     return reply.code(400).send({ error: "county is required" });
