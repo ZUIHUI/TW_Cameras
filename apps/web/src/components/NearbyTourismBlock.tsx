@@ -155,6 +155,10 @@ function tourismItemLink(item: NearbyTourismItem | GoogleRestaurantItem) {
     return { href: item.url, label: "開啟活動" };
   }
 
+  if (item.type === "activity") {
+    return { href: googleSearchUrl(item), label: "搜尋活動" };
+  }
+
   return { href: googleMapsUrl(item), label: "地圖查看" };
 }
 
@@ -215,4 +219,9 @@ function formatDistance(value: number) {
 function googleMapsUrl(item: { lat: number; lon: number; title?: string }) {
   const query = item.title ? `${item.title} ${item.lat},${item.lon}` : `${item.lat},${item.lon}`;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+function googleSearchUrl(item: { title: string; address?: string }) {
+  const query = [item.title, item.address, "活動"].filter(Boolean).join(" ");
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
 }
