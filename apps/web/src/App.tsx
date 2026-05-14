@@ -3,7 +3,6 @@ import {
   AlertCircle,
   ArrowUp,
   CloudRain,
-  ExternalLink,
   Heart,
   Layers,
   LocateFixed,
@@ -46,7 +45,7 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
 const favoriteStorageKey = "taiwan-live-cam:favorites";
 type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
-type MobileSheet = "search" | "layers" | "rain" | "favorites" | "detail";
+type MobileSheet = "search" | "layers" | "rain" | "nearby" | "favorites" | "detail";
 type ObservationTarget = { lat: number; lon: number; title: string };
 let startupLocationRequested = false;
 
@@ -97,7 +96,6 @@ export default function App() {
   const [activeMobileSheet, setActiveMobileSheet] = useState<MobileSheet | undefined>();
   const [mobileSheetSnap, setMobileSheetSnap] = useState<ControlPanelSnap>("half");
   const [mobileSheetDragOffset, setMobileSheetDragOffset] = useState(0);
-  const [nearbyRecommendationsOpen, setNearbyRecommendationsOpen] = useState(false);
   const [showPanelTopButton, setShowPanelTopButton] = useState(false);
   const [manualRefreshKey, setManualRefreshKey] = useState(0);
   const locationRequestInFlight = useRef(false);
@@ -110,21 +108,13 @@ export default function App() {
   const controlPanelContentRef = useRef<HTMLDivElement>(null);
 
   const summary = catalog?.summary;
-  const nearbyTourismTarget = useMemo(() => {
-    if (selectedCamera) {
-      return { lat: selectedCamera.lat, lon: selectedCamera.lon, title: selectedCamera.title, placement: "detail" as const };
-    }
-    if (selectedVehicleDetector) {
+  const nearbyTourismTarget = useMemo<ObservationTarget | undefined>(() => {
+    if (!userLocation) {
       return undefined;
     }
-    if (searchPlace) {
-      return { lat: searchPlace.lat, lon: searchPlace.lon, title: searchPlace.title, placement: "panel" as const };
-    }
-    if (cameraFilter === "nearby" && userLocation) {
-      return { lat: userLocation.lat, lon: userLocation.lon, title: "目前位置", placement: "panel" as const };
-    }
-    return undefined;
-  }, [cameraFilter, searchPlace, selectedCamera, selectedVehicleDetector, userLocation]);
+
+    return { lat: userLocation.lat, lon: userLocation.lon, title: "目前位置" };
+  }, [userLocation]);
 
   const rainObservationTarget = useMemo<ObservationTarget | undefined>(() => {
     if (selectedCamera) {
@@ -489,7 +479,6 @@ export default function App() {
   function selectCamera(camera: Camera) {
     setSelectedCamera(camera);
     setSelectedVehicleDetector(undefined);
-    setNearbyRecommendationsOpen(false);
     setActiveMobileSheet("detail");
   }
 
@@ -628,7 +617,6 @@ export default function App() {
     setFocusedListFilter(undefined);
     setVisibleLayers((current) => ({ ...current, cameras: true, vehicleDetectors: true }));
     setCameraFilter("nearby");
-    setNearbyRecommendationsOpen(false);
     setActiveMobileSheet("search");
     setMobileSheetSnap("half");
   }
@@ -884,13 +872,7 @@ export default function App() {
   }
 
   function openMobileLocationSearch() {
-    requestLocation({
-      afterSuccess: () => {
-        setActiveMobileSheet("search");
-        setMobileSheetSnap("half");
-        setNearbyRecommendationsOpen(true);
-      }
-    });
+    requestLocation();
   }
 
   function openMobileFavorites() {
@@ -904,6 +886,7 @@ export default function App() {
       search: "搜尋與點位",
       layers: "圖層與來源",
       rain: "雨天路況",
+      nearby: "附近推薦",
       favorites: "收藏點位"
     }[sheet];
   }
@@ -913,6 +896,7 @@ export default function App() {
       search: <Search size={18} />,
       layers: <Layers size={18} />,
       rain: <CloudRain size={18} />,
+      nearby: <MapPin size={18} />,
       favorites: <Star size={18} />
     }[sheet];
   }
@@ -978,38 +962,35 @@ export default function App() {
     );
   }
 
-  function renderMobileNearbyRecommendations() {
-    if (nearbyTourismTarget?.placement !== "panel") {
-      return null;
+  function renderMobileNearbySheet() {
+    if (!userLocation) {
+      return (
+        <div className="mobile-sheet-stack">
+          <div className="status-message warning">
+            <AlertCircle size={17} />
+            <span>請先取得目前定位，才能查看附近景點與餐飲。</span>
+          </div>
+          <button className="action-button mobile-mode-button" type="button" onClick={() => requestLocation()} disabled={loadingLocation}>
+            <LocateFixed size={17} />
+            {loadingLocation ? "定位中..." : "取得定位"}
+          </button>
+        </div>
+      );
     }
 
     return (
-      <section className="nearby-recommendation-frame mobile-nearby-card">
-        <button
-          className="nearby-recommendation-toggle"
-          type="button"
-          aria-expanded={nearbyRecommendationsOpen}
-          onClick={() => setNearbyRecommendationsOpen((current) => !current)}
-        >
-          <span>
-            <MapPin size={16} />
-            {nearbyTourismTarget.title} 附近景點與餐飲
-          </span>
-          <strong>{nearbyRecommendationsOpen ? "收合" : "展開"}</strong>
-        </button>
-        <div className={nearbyRecommendationsOpen ? "nearby-recommendation-content open" : "nearby-recommendation-content"}>
-          <NearbyTourismBlock
-            compact
-            tourism={nearbyTourism}
-            loading={nearbyTourismLoading}
-            error={nearbyTourismError}
-            googleRestaurants={googleRestaurants}
-            googleRestaurantsLoading={googleRestaurantsLoading}
-            googleRestaurantsError={googleRestaurantsError}
-            title="附近景點與餐飲"
-          />
-        </div>
-      </section>
+      <div className="mobile-sheet-stack">
+        <NearbyTourismBlock
+          compact
+          tourism={nearbyTourism}
+          loading={nearbyTourismLoading}
+          error={nearbyTourismError}
+          googleRestaurants={googleRestaurants}
+          googleRestaurantsLoading={googleRestaurantsLoading}
+          googleRestaurantsError={googleRestaurantsError}
+          title="目前定位附近景點與餐飲"
+        />
+      </div>
     );
   }
 
@@ -1110,6 +1091,7 @@ export default function App() {
         {renderMobileSearchBlock()}
         <SummaryStrip
           cameras={summary?.cameras.total ?? 0}
+          hideCounts
           sourceHealth={sourceHealth}
           updatedAt={catalog?.updatedAt}
           vehicleDetectors={summary?.vehicleDetectors.total ?? 0}
@@ -1133,7 +1115,6 @@ export default function App() {
           </div>
         )}
         {renderMobilePointList()}
-        {renderMobileNearbyRecommendations()}
       </div>
     );
   }
@@ -1601,7 +1582,7 @@ export default function App() {
           </div>
         )}
 
-        {nearbyTourismTarget?.placement === "panel" && (
+        {nearbyTourismTarget && (
           <NearbyTourismBlock
             compact
             tourism={nearbyTourism}
@@ -1610,7 +1591,7 @@ export default function App() {
             googleRestaurants={googleRestaurants}
             googleRestaurantsLoading={googleRestaurantsLoading}
             googleRestaurantsError={googleRestaurantsError}
-            title={`${nearbyTourismTarget.title}附近景點`}
+            title={`${nearbyTourismTarget.title}附近景點與餐飲`}
           />
         )}
 
@@ -1740,6 +1721,14 @@ export default function App() {
           <span>圖層</span>
         </button>
         <button
+          className={activeMobileSheet === "nearby" ? "mobile-nav-button active" : "mobile-nav-button"}
+          type="button"
+          onClick={() => openMobileSheet("nearby")}
+        >
+          <MapPin size={19} />
+          <span>附近</span>
+        </button>
+        <button
           className={activeMobileSheet === "favorites" || (!activeMobileSheet && cameraFilter === "favorites") ? "mobile-nav-button active" : "mobile-nav-button"}
           type="button"
           onClick={openMobileFavorites}
@@ -1767,6 +1756,7 @@ export default function App() {
           {activeMobileContextSheet === "search" && renderMobileSearchSheet()}
           {activeMobileContextSheet === "layers" && renderMobileLayerSheet()}
           {activeMobileContextSheet === "rain" && renderMobileRainSheet()}
+          {activeMobileContextSheet === "nearby" && renderMobileNearbySheet()}
           {activeMobileContextSheet === "favorites" && renderMobileFavoritesSheet()}
         </MobileContextSheet>
       )}
@@ -1777,30 +1767,17 @@ export default function App() {
           vehicleDetector={selectedVehicleDetector}
           environment={selectedCamera ? environment : undefined}
           environmentError={selectedCamera ? environmentError : ""}
-          nearbyTourism={selectedCamera ? nearbyTourism : undefined}
-          nearbyTourismError={selectedCamera ? nearbyTourismError : ""}
-          nearbyTourismLoading={selectedCamera ? nearbyTourismLoading : false}
-          googleRestaurants={selectedCamera ? googleRestaurants : []}
-          googleRestaurantsError={selectedCamera ? googleRestaurantsError : ""}
-          googleRestaurantsLoading={selectedCamera ? googleRestaurantsLoading : false}
           isFavorite={selectedCamera ? selectedIsFavorite : false}
-          nearbyRecommendationsOpen={nearbyRecommendationsOpen}
           onClose={() => {
             setSelectedCamera(undefined);
             setSelectedVehicleDetector(undefined);
             setActiveMobileSheet(undefined);
           }}
-          onToggleNearbyRecommendations={() => setNearbyRecommendationsOpen((current) => !current)}
           onToggleFavorite={() => selectedCamera && toggleFavorite(selectedCamera.id)}
         />
       )}
 
       <MapLegend />
-
-      <a className="source-link" href="https://tdx.transportdata.tw/" rel="noreferrer" target="_blank">
-        <ExternalLink size={14} />
-        公開資料來源
-      </a>
     </main>
   );
 }
@@ -1864,25 +1841,31 @@ function MobileContextSheet({
 
 function SummaryStrip({
   cameras,
+  hideCounts = false,
   sourceHealth,
   updatedAt,
   vehicleDetectors
 }: {
   cameras: number;
+  hideCounts?: boolean;
   sourceHealth: "ok" | "partial" | "unavailable";
   updatedAt?: string;
   vehicleDetectors: number;
 }) {
   return (
     <div className="summary-strip" aria-label="即時摘要">
-      <div>
-        <span>CCTV</span>
-        <strong>{formatNumber(cameras)}</strong>
-      </div>
-      <div>
-        <span>VD</span>
-        <strong>{formatNumber(vehicleDetectors)}</strong>
-      </div>
+      {!hideCounts && (
+        <div>
+          <span>CCTV</span>
+          <strong>{formatNumber(cameras)}</strong>
+        </div>
+      )}
+      {!hideCounts && (
+        <div>
+          <span>VD</span>
+          <strong>{formatNumber(vehicleDetectors)}</strong>
+        </div>
+      )}
       <div>
         <span>來源</span>
         <strong>{sourceHealthLabel(sourceHealth)}</strong>

@@ -1220,8 +1220,7 @@ h3 {
 }
 
 .detail-footer span,
-.stream-source-link,
-.source-link {
+.stream-source-link {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -1229,18 +1228,6 @@ h3 {
   font-size: 13px;
   font-weight: 800;
   text-decoration: none;
-}
-
-.source-link {
-  position: absolute;
-  right: 18px;
-  top: 18px;
-  z-index: 790;
-  min-height: 36px;
-  border: 1px solid rgba(31, 75, 58, 0.14);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  padding: 0 12px;
 }
 
 .map-legend {
@@ -1624,18 +1611,13 @@ h3 {
     padding: 14px;
   }
 
-  .source-link {
-    left: 8px;
-    right: auto;
-    top: 8px;
-  }
-
   .map-legend {
-    left: 8px;
+    left: auto;
     right: 8px;
     top: 52px;
-    max-width: none;
-    justify-content: flex-end;
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    justify-content: flex-start;
   }
 }
 
