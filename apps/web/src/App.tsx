@@ -807,6 +807,7 @@ export default function App() {
           </button>
         </div>
 
+        <div className="control-panel-sticky-controls">
         <div className="search-block">
           <label className="search-box">
             <Search size={18} />
@@ -864,13 +865,6 @@ export default function App() {
           )}
         </div>
 
-        <SummaryStrip
-          cameras={summary?.cameras.total ?? 0}
-          sourceHealth={sourceHealth}
-          updatedAt={catalog?.updatedAt}
-          vehicleDetectors={summary?.vehicleDetectors.total ?? 0}
-        />
-
         <div className="quick-actions">
           <button
             className={isLocationMode ? "action-button active" : "action-button"}
@@ -914,6 +908,14 @@ export default function App() {
             </button>
           ))}
         </div>
+        </div>
+
+        <SummaryStrip
+          cameras={summary?.cameras.total ?? 0}
+          sourceHealth={sourceHealth}
+          updatedAt={catalog?.updatedAt}
+          vehicleDetectors={summary?.vehicleDetectors.total ?? 0}
+        />
 
         <section className="layer-panel" aria-label="圖層與來源">
           <div className="panel-title">
