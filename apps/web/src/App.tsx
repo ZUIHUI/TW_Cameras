@@ -93,6 +93,7 @@ export default function App() {
   const [controlPanelSnap, setControlPanelSnap] = useState<ControlPanelSnap>("half");
   const [controlPanelDragOffset, setControlPanelDragOffset] = useState(0);
   const [showPanelTopButton, setShowPanelTopButton] = useState(false);
+  const [manualRefreshKey, setManualRefreshKey] = useState(0);
   const locationRequestInFlight = useRef(false);
   const filterBeforePlaceSearch = useRef<CameraFilter>("all");
   const radarBeforeRainMode = useRef(false);
@@ -168,7 +169,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [selectedCamera?.county]);
+  }, [manualRefreshKey, selectedCamera?.county]);
 
   useEffect(() => {
     setNearbyTourism(undefined);
@@ -195,7 +196,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [nearbyTourismTarget]);
+  }, [manualRefreshKey, nearbyTourismTarget]);
 
   useEffect(() => {
     setRadarOverlayError("");
@@ -225,7 +226,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [visibleLayers.radar]);
+  }, [manualRefreshKey, visibleLayers.radar]);
 
   useEffect(() => {
     setRainfall(undefined);
@@ -252,7 +253,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [rainModeActive, rainObservationTarget]);
+  }, [manualRefreshKey, rainModeActive, rainObservationTarget]);
 
   useEffect(() => {
     setRainEnvironment(undefined);
@@ -279,7 +280,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [rainModeActive, rainfall?.stations[0]?.county, selectedCamera?.county]);
+  }, [manualRefreshKey, rainModeActive, rainfall?.stations[0]?.county, selectedCamera?.county]);
 
   useEffect(() => {
     setGoogleRestaurants([]);
@@ -306,7 +307,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [nearbyTourismTarget]);
+  }, [manualRefreshKey, nearbyTourismTarget]);
 
   useEffect(() => {
     setVisibleCount(80);
@@ -354,6 +355,11 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function refreshCurrentView() {
+    await loadCameras();
+    setManualRefreshKey((key) => key + 1);
   }
 
   function requestLocation(options: { silent?: boolean; preserveFilter?: boolean } = {}) {
@@ -814,7 +820,14 @@ export default function App() {
             <p className="eyebrow">Taiwan Live Cam</p>
             <h1>台灣即時影像</h1>
           </div>
-          <button className="icon-button" type="button" onClick={loadCameras} title="重新整理" disabled={loading}>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={refreshCurrentView}
+            title="重新整理目前資料"
+            aria-label="重新整理目前資料"
+            disabled={loading}
+          >
             <RefreshCw size={18} />
           </button>
         </div>
