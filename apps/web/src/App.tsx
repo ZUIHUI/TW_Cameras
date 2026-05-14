@@ -2044,10 +2044,35 @@ function MapHud({
   loading: boolean;
   target?: ObservationTarget;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [interactive, setInteractive] = useState(false);
+  const legendId = "map-hud-legend";
+  const className = ["map-hud", expanded ? "expanded" : "", target ? "" : "no-weather"].filter(Boolean).join(" ");
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 980px)");
+    const syncInteractive = () => setInteractive(query.matches);
+
+    syncInteractive();
+    query.addEventListener("change", syncInteractive);
+    return () => query.removeEventListener("change", syncInteractive);
+  }, []);
+
   return (
-    <div className="map-hud" aria-label="地圖資訊">
-      <MapWeatherChip environment={environment} error={error} loading={loading} target={target} />
-      <MapLegend />
+    <div className={className} aria-label="地圖資訊">
+      <MapWeatherChip
+        environment={environment}
+        error={error}
+        expanded={expanded}
+        interactive={interactive}
+        legendId={legendId}
+        loading={loading}
+        onToggle={() => interactive && setExpanded((current) => !current)}
+        target={target}
+      />
+      <div className="map-hud-legend" id={legendId}>
+        <MapLegend />
+      </div>
     </div>
   );
 }
@@ -2055,12 +2080,20 @@ function MapHud({
 function MapWeatherChip({
   environment,
   error,
+  expanded,
+  interactive,
+  legendId,
   loading,
+  onToggle,
   target
 }: {
   environment?: EnvironmentSummary;
   error: string;
+  expanded: boolean;
+  interactive: boolean;
+  legendId: string;
   loading: boolean;
+  onToggle: () => void;
   target?: ObservationTarget;
 }) {
   if (!target) {
@@ -2069,14 +2102,37 @@ function MapWeatherChip({
 
   const weather = environment?.weather;
   const hasWarning = Boolean(error);
-
-  return (
-    <div className={hasWarning ? "map-weather-chip warning" : "map-weather-chip"} title={weather?.description || error || target.title}>
+  const className = hasWarning ? "map-weather-chip warning" : "map-weather-chip";
+  const title = weather?.description || error || target.title;
+  const content = (
+    <>
       {weatherIcon(weather)}
       <span>{loading ? "天氣更新中" : environment?.county || target.title}</span>
       <strong>{loading ? "..." : formatWeatherTemperature(weather)}</strong>
       <small>{hasWarning ? "天氣暫停" : formatWeatherRain(weather)}</small>
-    </div>
+      {interactive && <i className="map-weather-caret" aria-hidden="true" />}
+    </>
+  );
+
+  if (!interactive) {
+    return (
+      <div className={className} title={title}>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      className={className}
+      type="button"
+      aria-controls={legendId}
+      aria-expanded={expanded}
+      onClick={onToggle}
+      title={title}
+    >
+      {content}
+    </button>
   );
 }
 
