@@ -933,7 +933,7 @@ export default function App() {
       search: "搜尋與點位",
       layers: "圖層與來源",
       rain: "雨天路況",
-      nearby: "附近推薦",
+      nearby: "地圖推薦",
       favorites: "收藏點位"
     }[sheet];
   }
@@ -1015,7 +1015,7 @@ export default function App() {
         <div className="mobile-sheet-stack">
           <div className="status-message warning">
             <AlertCircle size={17} />
-            <span>請先移動或載入地圖，才能查看目前地圖位置附近的景點與餐飲。</span>
+            <span>請先移動或載入地圖，才能查看目前地圖位置的景點與餐飲推薦。</span>
           </div>
         </div>
       );
@@ -1031,7 +1031,7 @@ export default function App() {
           googleRestaurants={googleRestaurants}
           googleRestaurantsLoading={googleRestaurantsLoading}
           googleRestaurantsError={googleRestaurantsError}
-          title={`${nearbyTourismTarget.title}附近景點與餐飲`}
+          title={formatMapRecommendationTitle(nearbyTourismTarget)}
         />
       </div>
     );
@@ -1628,7 +1628,7 @@ export default function App() {
             googleRestaurants={googleRestaurants}
             googleRestaurantsLoading={googleRestaurantsLoading}
             googleRestaurantsError={googleRestaurantsError}
-            title={`${nearbyTourismTarget.title}附近景點與餐飲`}
+            title={formatMapRecommendationTitle(nearbyTourismTarget)}
           />
         )}
 
@@ -1763,7 +1763,7 @@ export default function App() {
           onClick={() => openMobileSheet("nearby")}
         >
           <MapPin size={19} />
-          <span>附近</span>
+          <span>推薦</span>
         </button>
         <button
           className={activeMobileSheet === "favorites" || (!activeMobileSheet && cameraFilter === "favorites") ? "mobile-nav-button active" : "mobile-nav-button"}
@@ -2102,6 +2102,7 @@ function MapWeatherChip({
 
   const weather = environment?.weather;
   const hasWarning = Boolean(error);
+  const aqiBadge = formatMapAqi(environment);
   const className = hasWarning ? "map-weather-chip warning" : "map-weather-chip";
   const title = weather?.description || error || target.title;
   const content = (
@@ -2110,6 +2111,11 @@ function MapWeatherChip({
       <span>{loading ? "天氣更新中" : environment?.county || target.title}</span>
       <strong>{loading ? "..." : formatWeatherTemperature(weather)}</strong>
       <small>{hasWarning ? "天氣暫停" : formatWeatherRain(weather)}</small>
+      {aqiBadge && (
+        <b className={`map-aqi-badge ${aqiBadge.level}`} title={aqiBadge.title}>
+          {aqiBadge.label}
+        </b>
+      )}
       {interactive && <i className="map-weather-caret" aria-hidden="true" />}
     </>
   );
@@ -2162,6 +2168,35 @@ function formatWeatherTemperature(weather?: EnvironmentSummary["weather"]) {
 
 function formatWeatherRain(weather?: EnvironmentSummary["weather"]) {
   return weather?.rainProbability !== undefined ? `降雨 ${weather.rainProbability}%` : "降雨 --";
+}
+
+function formatMapAqi(environment?: EnvironmentSummary) {
+  const averageAqi = environment?.aqi?.averageAqi;
+  if (averageAqi === undefined) {
+    return undefined;
+  }
+
+  const value = Math.round(averageAqi);
+  const status = environment?.aqi?.status;
+  const pollutant = environment?.aqi?.dominantPollutant;
+  const details = [status, pollutant ? `主要污染物 ${pollutant}` : ""].filter(Boolean).join(" · ");
+
+  return {
+    label: `AQI ${value}`,
+    level: aqiLevelClass(value),
+    title: details ? `AQI ${value} · ${details}` : `AQI ${value}`
+  };
+}
+
+function aqiLevelClass(value: number) {
+  if (value <= 50) return "good";
+  if (value <= 100) return "moderate";
+  if (value <= 150) return "sensitive";
+  return "unhealthy";
+}
+
+function formatMapRecommendationTitle(target: ObservationTarget) {
+  return `${target.title}的景點與餐飲`;
 }
 
 function MapLegend() {

@@ -1284,13 +1284,46 @@ h3 {
 }
 
 .map-weather-chip strong,
-.map-weather-chip small {
+.map-weather-chip small,
+.map-aqi-badge {
   flex: 0 0 auto;
 }
 
 .map-weather-chip small {
   color: inherit;
   opacity: 0.72;
+}
+
+.map-aqi-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(23, 55, 45, 0.1);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.map-aqi-badge.good {
+  background: #e8f6ef;
+  color: #0f6b4f;
+}
+
+.map-aqi-badge.moderate {
+  background: #fff7d6;
+  color: #795100;
+}
+
+.map-aqi-badge.sensitive {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.map-aqi-badge.unhealthy {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .map-weather-caret {
