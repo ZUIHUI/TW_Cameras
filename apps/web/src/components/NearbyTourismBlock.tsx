@@ -1,4 +1,4 @@
-import { AlertCircle, ExternalLink, MapPin } from "lucide-react";
+import { AlertCircle, MapPin } from "lucide-react";
 import type { GoogleRestaurantItem, NearbyTourismItem, NearbyTourismResponse, TourismItemType } from "../types";
 
 interface NearbyTourismBlockProps {
@@ -121,7 +121,7 @@ function TourismGroup({ items, label }: { items: NearbyTourismItem[]; label: str
 
 function TourismItemCard({ item }: { item: NearbyTourismItem | GoogleRestaurantItem }) {
   const isGoogleRestaurant = isGoogleRestaurantItem(item);
-  const sourceUrl = isGoogleRestaurant ? item.googleMapsUrl : item.url || googleMapsUrl(item);
+  const mapUrl = isGoogleRestaurant ? item.googleMapsUrl : googleMapsUrl(item);
   const metadata = isGoogleRestaurant ? googleRestaurantMetadata(item) : formatDistance(item.distanceMeters);
   const description = isGoogleRestaurant ? item.address : item.description;
 
@@ -136,11 +136,7 @@ function TourismItemCard({ item }: { item: NearbyTourismItem | GoogleRestaurantI
         <small>{metadata}</small>
         {description && <p>{description}</p>}
         <div className="tourism-links">
-          <a href={sourceUrl} rel="noreferrer" target="_blank">
-            <ExternalLink size={14} />
-            開啟來源
-          </a>
-          <a href={googleMapsUrl(item)} rel="noreferrer" target="_blank">
+          <a href={mapUrl} rel="noreferrer" target="_blank">
             <MapPin size={14} />
             地圖查看
           </a>
