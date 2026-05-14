@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertCircle,
+  ArrowUp,
   CloudRain,
   ExternalLink,
   Heart,
@@ -12,7 +13,7 @@ import {
   Video,
   X
 } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getCameras, getEnvironment, getNearbyTourism, getRadarOverlay, getRainfallNearby } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
@@ -91,11 +92,13 @@ export default function App() {
   const [showSourceDetails, setShowSourceDetails] = useState(false);
   const [controlPanelSnap, setControlPanelSnap] = useState<ControlPanelSnap>("half");
   const [controlPanelDragOffset, setControlPanelDragOffset] = useState(0);
+  const [showPanelTopButton, setShowPanelTopButton] = useState(false);
   const locationRequestInFlight = useRef(false);
   const filterBeforePlaceSearch = useRef<CameraFilter>("all");
   const radarBeforeRainMode = useRef(false);
   const controlPanelDrag = useRef<{ startY: number; moved: boolean } | undefined>(undefined);
   const suppressPanelHandleClick = useRef(false);
+  const controlPanelContentRef = useRef<HTMLDivElement>(null);
 
   const summary = catalog?.summary;
   const nearbyTourismTarget = useMemo(() => {
@@ -762,6 +765,15 @@ export default function App() {
     }
   }
 
+  function handleControlPanelScroll(event: UIEvent<HTMLDivElement>) {
+    const shouldShow = event.currentTarget.scrollTop > 220;
+    setShowPanelTopButton((current) => (current === shouldShow ? current : shouldShow));
+  }
+
+  function scrollControlPanelToTop() {
+    controlPanelContentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   return (
     <main className="app-shell">
       <CameraMap
@@ -796,7 +808,7 @@ export default function App() {
           onPointerMove={moveControlPanelDrag}
           onPointerUp={endControlPanelDrag}
         />
-        <div className="control-panel-content">
+        <div className="control-panel-content" ref={controlPanelContentRef} onScroll={handleControlPanelScroll}>
         <div className="brand-row">
           <div>
             <p className="eyebrow">Taiwan Live Cam</p>
@@ -807,7 +819,6 @@ export default function App() {
           </button>
         </div>
 
-        <div className="control-panel-sticky-controls">
         <div className="search-block">
           <label className="search-box">
             <Search size={18} />
@@ -865,6 +876,13 @@ export default function App() {
           )}
         </div>
 
+        <SummaryStrip
+          cameras={summary?.cameras.total ?? 0}
+          sourceHealth={sourceHealth}
+          updatedAt={catalog?.updatedAt}
+          vehicleDetectors={summary?.vehicleDetectors.total ?? 0}
+        />
+
         <div className="quick-actions">
           <button
             className={isLocationMode ? "action-button active" : "action-button"}
@@ -908,14 +926,6 @@ export default function App() {
             </button>
           ))}
         </div>
-        </div>
-
-        <SummaryStrip
-          cameras={summary?.cameras.total ?? 0}
-          sourceHealth={sourceHealth}
-          updatedAt={catalog?.updatedAt}
-          vehicleDetectors={summary?.vehicleDetectors.total ?? 0}
-        />
 
         <section className="layer-panel" aria-label="圖層與來源">
           <div className="panel-title">
@@ -1142,6 +1152,17 @@ export default function App() {
           )}
         </div>
         </div>
+        {showPanelTopButton && (
+          <button
+            className="panel-top-button"
+            type="button"
+            onClick={scrollControlPanelToTop}
+            aria-label="回到最上方"
+            title="回到最上方"
+          >
+            <ArrowUp size={20} />
+          </button>
+        )}
       </aside>
 
       {(selectedCamera || selectedVehicleDetector) && (
