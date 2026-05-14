@@ -796,6 +796,7 @@ export default function App() {
           onPointerMove={moveControlPanelDrag}
           onPointerUp={endControlPanelDrag}
         />
+        <div className="control-panel-content">
         <div className="brand-row">
           <div>
             <p className="eyebrow">Taiwan Live Cam</p>
@@ -1062,7 +1063,7 @@ export default function App() {
             googleRestaurants={googleRestaurants}
             googleRestaurantsLoading={googleRestaurantsLoading}
             googleRestaurantsError={googleRestaurantsError}
-            title={`${nearbyTourismTarget.title}附近玩樂`}
+            title={`${nearbyTourismTarget.title}附近景點`}
           />
         )}
 
@@ -1137,6 +1138,7 @@ export default function App() {
               </button>
             </div>
           )}
+        </div>
         </div>
       </aside>
 

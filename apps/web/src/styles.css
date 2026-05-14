@@ -86,7 +86,16 @@ input:disabled {
   flex-direction: column;
   border-radius: 8px;
   padding: 18px;
+}
+
+.control-panel-content {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 14px;
+  overflow: auto;
+  padding-right: 3px;
 }
 
 .control-panel-handle {
@@ -721,8 +730,6 @@ h3 {
 
 .camera-list {
   min-height: 0;
-  overflow: auto;
-  padding-right: 3px;
 }
 
 .camera-item {
@@ -1288,7 +1295,7 @@ h3 {
     inset: auto 8px 8px;
     height: 52vh;
     max-height: none;
-    overflow: auto;
+    overflow: hidden;
     padding: 8px 14px 14px;
     transform: translateY(var(--panel-drag-offset));
     transition:
