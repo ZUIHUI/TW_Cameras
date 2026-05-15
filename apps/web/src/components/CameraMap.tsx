@@ -25,9 +25,11 @@ interface CameraMapProps {
   searchPlace?: SearchPlace;
   userLocation?: { lat: number; lon: number };
   userLocationFocusRequest?: number;
+  followUserLocation?: boolean;
   focusCameras?: Camera[];
   onSelectCamera: (camera: Camera) => void;
   onSelectVehicleDetector?: (vd: VehicleDetector) => void;
+  onUserMapGesture?: () => void;
   onViewportTargetChange?: (target: { lat: number; lon: number; title: string }) => void;
 }
 
@@ -52,9 +54,11 @@ export function CameraMap({
   searchPlace,
   userLocation,
   userLocationFocusRequest,
+  followUserLocation = false,
   focusCameras,
   onSelectCamera,
   onSelectVehicleDetector,
+  onUserMapGesture,
   onViewportTargetChange
 }: CameraMapProps) {
   const mapElementRef = useRef<HTMLDivElement>(null);
@@ -67,13 +71,17 @@ export function CameraMap({
   const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const onSelectCameraRef = useRef(onSelectCamera);
   const onSelectVehicleDetectorRef = useRef(onSelectVehicleDetector);
+  const onUserMapGestureRef = useRef(onUserMapGesture);
   const onViewportTargetChangeRef = useRef(onViewportTargetChange);
+  const lastUserLocationFocusRequestRef = useRef(userLocationFocusRequest);
+  const lastFollowPanKeyRef = useRef("");
   const [map, setMap] = useState<google.maps.Map | undefined>();
   const [viewportBounds, setViewportBounds] = useState<google.maps.LatLngBoundsLiteral | undefined>();
   const [loadError, setLoadError] = useState("");
 
   onSelectCameraRef.current = onSelectCamera;
   onSelectVehicleDetectorRef.current = onSelectVehicleDetector;
+  onUserMapGestureRef.current = onUserMapGesture;
   onViewportTargetChangeRef.current = onViewportTargetChange;
 
   function ensureMarker({
@@ -223,6 +231,18 @@ export function CameraMap({
 
     const listener = map.addListener("idle", syncViewportBounds);
     syncViewportBounds();
+
+    return () => {
+      listener.remove();
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    const listener = map.addListener("dragstart", () => {
+      onUserMapGestureRef.current?.();
+    });
 
     return () => {
       listener.remove();
@@ -425,10 +445,29 @@ export function CameraMap({
       return;
     }
 
+    if (lastUserLocationFocusRequestRef.current === userLocationFocusRequest) {
+      return;
+    }
+    lastUserLocationFocusRequestRef.current = userLocationFocusRequest;
+
     const center = toLatLng(userLocation);
     const bounds = circleBounds(center, USER_LOCATION_RADIUS_METERS);
     map.fitBounds(bounds, 24);
   }, [map, userLocation?.lat, userLocation?.lon, userLocationFocusRequest]);
+
+  useEffect(() => {
+    if (!map || !followUserLocation || !userLocation) return;
+
+    const center = toLatLng(userLocation);
+    const locationKey = `${center.lat.toFixed(6)}:${center.lng.toFixed(6)}`;
+    if (lastFollowPanKeyRef.current === locationKey) {
+      return;
+    }
+
+    lastFollowPanKeyRef.current = locationKey;
+    map.panTo(center);
+    map.setZoom(Math.max(map.getZoom() || 15, 15));
+  }, [followUserLocation, map, userLocation?.lat, userLocation?.lon]);
 
   useEffect(() => {
     if (!map) return;

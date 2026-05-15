@@ -49,7 +49,7 @@ type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
 type MobileSheet = "search" | "layers" | "rain" | "nearby" | "favorites" | "detail";
 type ObservationTarget = { lat: number; lon: number; title: string };
-let startupLocationRequested = false;
+const LOCATION_FOLLOW_THRESHOLD_METERS = 25;
 
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
@@ -74,6 +74,8 @@ export default function App() {
   const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites());
   const [userLocation, setUserLocation] = useState<UserLocation | undefined>();
   const [userLocationFocusRequest, setUserLocationFocusRequest] = useState(0);
+  const [locationFollowActive, setLocationFollowActive] = useState(false);
+  const [locationFollowPaused, setLocationFollowPaused] = useState(false);
   const [visibleCount, setVisibleCount] = useState(80);
   const [loading, setLoading] = useState(true);
   const [loadingLocation, setLoadingLocation] = useState(false);
@@ -106,6 +108,10 @@ export default function App() {
   const [showPanelTopButton, setShowPanelTopButton] = useState(false);
   const [manualRefreshKey, setManualRefreshKey] = useState(0);
   const locationRequestInFlight = useRef(false);
+  const locationWatchIdRef = useRef<number | undefined>(undefined);
+  const lastFollowLocationRef = useRef<UserLocation | undefined>(undefined);
+  const focusNextLocationRef = useRef(false);
+  const pendingLocationSuccessCallbacksRef = useRef<Array<() => void>>([]);
   const filterBeforePlaceSearch = useRef<CameraFilter>("all");
   const radarBeforeRainMode = useRef(false);
   const controlPanelDrag = useRef<{ startY: number; moved: boolean } | undefined>(undefined);
@@ -138,12 +144,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (startupLocationRequested) {
-      return;
-    }
+    requestLocation({ clearContext: false, focus: true });
 
-    startupLocationRequested = true;
-    requestLocation({ silent: true });
+    return () => {
+      clearLocationWatch();
+    };
   }, []);
 
   useEffect(() => {
@@ -407,15 +412,18 @@ export default function App() {
     setManualRefreshKey((key) => key + 1);
   }
 
-  function requestLocation(options: { afterSuccess?: () => void; silent?: boolean; preserveFilter?: boolean } = {}) {
-    if (locationRequestInFlight.current) {
-      return;
-    }
+  function requestLocation(
+    options: { afterSuccess?: () => void; silent?: boolean; preserveFilter?: boolean; clearContext?: boolean; focus?: boolean } = {}
+  ) {
+    const shouldClearContext = options.clearContext ?? !options.silent;
+    const shouldFocus = options.focus ?? !options.silent;
 
     setFocusedListFilter(undefined);
 
     if (!navigator.geolocation) {
-      if (!options.silent) setError("此瀏覽器不支援定位。");
+      if (!options.silent) setError("此瀏覽器不支援定位，請改用可取得 GPS 的瀏覽器。");
+      setLocationFollowActive(false);
+      setLocationFollowPaused(false);
       return;
     }
 
@@ -423,43 +431,112 @@ export default function App() {
       setError("");
     }
 
+    if (shouldClearContext) {
+      setSelectedCamera(undefined);
+      setSelectedVehicleDetector(undefined);
+      setSearchPlace(undefined);
+      setPlacePredictions([]);
+      setPlacesError("");
+      setQuery("");
+    }
+
+    if (!options.preserveFilter) {
+      setCameraFilter("nearby");
+    }
+
+    if (shouldFocus) {
+      focusNextLocationRef.current = true;
+    }
+
+    setLocationFollowActive(true);
+    setLocationFollowPaused(false);
+
+    if (options.afterSuccess) {
+      if (userLocation) {
+        options.afterSuccess();
+      } else {
+        pendingLocationSuccessCallbacksRef.current.push(options.afterSuccess);
+      }
+    }
+
+    if (locationWatchIdRef.current !== undefined) {
+      if (shouldFocus && userLocation) {
+        setUserLocationFocusRequest((request) => request + 1);
+        focusNextLocationRef.current = false;
+      }
+      setLoadingLocation(!userLocation);
+      return;
+    }
+
     locationRequestInFlight.current = true;
     setLoadingLocation(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        if (!options.silent) {
-          setSelectedCamera(undefined);
-          setSelectedVehicleDetector(undefined);
-          setSearchPlace(undefined);
-          setPlacePredictions([]);
-          setPlacesError("");
-          setQuery("");
-        }
-        setUserLocation({
-          lat: position.coords.latitude,
-          lon: position.coords.longitude
-        });
-        if (!options.preserveFilter) {
-          setCameraFilter("nearby");
-        }
-        if (!options.silent) {
-          setUserLocationFocusRequest((request) => request + 1);
-        }
-        options.afterSuccess?.();
-        setLoadingLocation(false);
-        locationRequestInFlight.current = false;
-      },
-      () => {
-        if (!options.silent) setError("無法取得定位，請確認瀏覽器權限後再試。");
-        setLoadingLocation(false);
-        locationRequestInFlight.current = false;
-      },
+    locationWatchIdRef.current = navigator.geolocation.watchPosition(
+      handleLocationWatchSuccess,
+      handleLocationWatchError(options.silent),
       {
         enableHighAccuracy: true,
-        maximumAge: 60 * 1000,
-        timeout: 10000
+        maximumAge: 5000,
+        timeout: 15000
       }
     );
+  }
+
+  function handleLocationWatchSuccess(position: GeolocationPosition) {
+    const nextLocation = {
+      lat: position.coords.latitude,
+      lon: position.coords.longitude
+    };
+    const previousLocation = lastFollowLocationRef.current;
+    const movedEnough =
+      !previousLocation || distanceKm(previousLocation, nextLocation) * 1000 >= LOCATION_FOLLOW_THRESHOLD_METERS;
+
+    if (movedEnough) {
+      lastFollowLocationRef.current = nextLocation;
+      setUserLocation(nextLocation);
+    }
+
+    if (focusNextLocationRef.current) {
+      if (!movedEnough) {
+        setUserLocation(nextLocation);
+      }
+      setUserLocationFocusRequest((request) => request + 1);
+      focusNextLocationRef.current = false;
+    }
+
+    const callbacks = pendingLocationSuccessCallbacksRef.current.splice(0);
+    callbacks.forEach((callback) => callback());
+    setLoadingLocation(false);
+    locationRequestInFlight.current = false;
+  }
+
+  function handleLocationWatchError(silent?: boolean) {
+    return () => {
+      clearLocationWatch();
+      setLocationFollowActive(false);
+      setLocationFollowPaused(false);
+      setLoadingLocation(false);
+      locationRequestInFlight.current = false;
+      focusNextLocationRef.current = false;
+      pendingLocationSuccessCallbacksRef.current = [];
+      if (!silent) setError("無法取得定位，請確認瀏覽器定位權限或 GPS 狀態。");
+    };
+  }
+
+  function pauseLocationFollow() {
+    if (locationWatchIdRef.current === undefined) {
+      return;
+    }
+
+    setLocationFollowActive(false);
+    setLocationFollowPaused(true);
+    focusNextLocationRef.current = false;
+  }
+
+  function clearLocationWatch() {
+    if (locationWatchIdRef.current !== undefined && navigator.geolocation) {
+      navigator.geolocation.clearWatch(locationWatchIdRef.current);
+    }
+    locationWatchIdRef.current = undefined;
   }
 
   function toggleFavorite(cameraId: string) {
@@ -524,12 +601,14 @@ export default function App() {
   }
 
   function selectCamera(camera: Camera) {
+    pauseLocationFollow();
     setSelectedCamera(camera);
     setSelectedVehicleDetector(undefined);
     setActiveMobileSheet("detail");
   }
 
   function selectVehicleDetector(vehicleDetector: VehicleDetector) {
+    pauseLocationFollow();
     setSelectedVehicleDetector(vehicleDetector);
     setSelectedCamera(undefined);
     setActiveMobileSheet("detail");
@@ -652,6 +731,8 @@ export default function App() {
   }
 
   function activatePlaceSearch(place: SearchPlace) {
+    pauseLocationFollow();
+
     if (!searchPlace) {
       filterBeforePlaceSearch.current = cameraFilter;
     }
@@ -734,7 +815,6 @@ export default function App() {
 
   const favoriteCount = favorites.size;
   const selectedIsFavorite = selectedCamera ? favorites.has(selectedCamera.id) : false;
-  const isLocationMode = cameraFilter === "nearby" && Boolean(userLocation) && !searchPlace;
   const isFocusedList = Boolean(focusedListFilter);
   const listDistanceOrigin = rainModeActive ? rainObservationTarget : searchPlace ?? (cameraFilter === "nearby" ? userLocation : undefined);
   const rainWeather = selectedCamera ? environment : rainEnvironment;
@@ -1331,9 +1411,11 @@ export default function App() {
         searchPlace={searchPlace}
         userLocation={userLocation}
         userLocationFocusRequest={userLocationFocusRequest}
+        followUserLocation={locationFollowActive}
         focusCameras={focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
         onSelectVehicleDetector={selectVehicleDetector}
+        onUserMapGesture={pauseLocationFollow}
         onViewportTargetChange={setMapViewportTarget}
       />
 
@@ -1438,10 +1520,12 @@ export default function App() {
 
         <div className="quick-actions">
           <button
-            className={isLocationMode ? "action-button active" : "action-button"}
+            className={locationFollowActive ? "action-button active" : "action-button"}
             type="button"
             onClick={() => requestLocation()}
             disabled={loadingLocation}
+            aria-pressed={locationFollowActive}
+            title={locationFollowPaused ? "回到目前位置並恢復跟隨" : "移到目前位置"}
           >
             <LocateFixed size={17} />
             {loadingLocation ? "定位中" : "附近影像"}
@@ -1728,10 +1812,12 @@ export default function App() {
           <span>搜尋</span>
         </button>
         <button
-          className={isLocationMode ? "mobile-nav-button active" : "mobile-nav-button"}
+          className={locationFollowActive ? "mobile-nav-button active" : "mobile-nav-button"}
           type="button"
           onClick={openMobileLocationSearch}
           disabled={loadingLocation}
+          aria-pressed={locationFollowActive}
+          title={locationFollowPaused ? "回到目前位置並恢復跟隨" : "移到目前位置"}
         >
           <LocateFixed size={19} />
           <span>定位</span>
