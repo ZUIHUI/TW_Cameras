@@ -4,8 +4,13 @@ import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
 import type { Camera, RadarOverlayResponse, SearchPlace, VehicleDetector } from "../types";
 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
+const TAIWAN_TIME_ZONE = "Asia/Taipei";
 const USER_LOCATION_RADIUS_METERS = 500;
 const VIEWPORT_PADDING_RATIO = 0.35;
+const NIGHT_START_HOUR = 18;
+const DAY_START_HOUR = 6;
+
+type MapTheme = "day" | "night";
 
 const markerColors: Record<Camera["category"] | "traffic", string> = {
   freeway: "#0e6b52",
@@ -14,6 +19,103 @@ const markerColors: Record<Camera["category"] | "traffic", string> = {
   scenic: "#0f9f9a",
   traffic: "#8b5cf6"
 };
+
+const dayMapStyles: google.maps.MapTypeStyle[] = [
+  {
+    featureType: "poi.business",
+    stylers: [{ visibility: "off" }]
+  },
+  {
+    featureType: "transit",
+    stylers: [{ visibility: "off" }]
+  },
+  {
+    featureType: "water",
+    stylers: [{ color: "#cfe8f3" }]
+  }
+];
+
+const nightMapStyles: google.maps.MapTypeStyle[] = [
+  {
+    elementType: "geometry",
+    stylers: [{ color: "#1f2937" }]
+  },
+  {
+    elementType: "labels.icon",
+    stylers: [{ visibility: "off" }]
+  },
+  {
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#d1d5db" }]
+  },
+  {
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#111827" }]
+  },
+  {
+    featureType: "administrative",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#4b5563" }]
+  },
+  {
+    featureType: "landscape",
+    elementType: "geometry",
+    stylers: [{ color: "#18212f" }]
+  },
+  {
+    featureType: "poi",
+    elementType: "geometry",
+    stylers: [{ color: "#243044" }]
+  },
+  {
+    featureType: "poi",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#9ca3af" }]
+  },
+  {
+    featureType: "poi.business",
+    stylers: [{ visibility: "off" }]
+  },
+  {
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [{ color: "#374151" }]
+  },
+  {
+    featureType: "road",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#111827" }]
+  },
+  {
+    featureType: "road",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#e5e7eb" }]
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry",
+    stylers: [{ color: "#475569" }]
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#0f172a" }]
+  },
+  {
+    featureType: "transit",
+    stylers: [{ visibility: "off" }]
+  },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#0f2537" }]
+  },
+  {
+    featureType: "water",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#93c5fd" }]
+  }
+];
 
 interface CameraMapProps {
   cameras: Camera[];
@@ -76,6 +178,7 @@ export function CameraMap({
   const lastUserLocationFocusRequestRef = useRef(userLocationFocusRequest);
   const lastFollowPanKeyRef = useRef("");
   const [map, setMap] = useState<google.maps.Map | undefined>();
+  const [mapTheme, setMapTheme] = useState<MapTheme>(() => getCurrentMapTheme());
   const [viewportBounds, setViewportBounds] = useState<google.maps.LatLngBoundsLiteral | undefined>();
   const [loadError, setLoadError] = useState("");
 
@@ -143,7 +246,9 @@ export function CameraMap({
       .then(({ Map }) => {
         if (cancelled || !mapElementRef.current) return;
 
+        const initialMapTheme = getCurrentMapTheme();
         const nextMap = new Map(mapElementRef.current, {
+          backgroundColor: mapBackgroundColor(initialMapTheme),
           center: TAIWAN_CENTER,
           clickableIcons: false,
           fullscreenControl: false,
@@ -152,6 +257,7 @@ export function CameraMap({
           maxZoom: 18,
           minZoom: 6,
           streetViewControl: false,
+          styles: mapStylesForTheme(initialMapTheme),
           zoom: 7
         });
 
@@ -168,6 +274,26 @@ export function CameraMap({
       setMap(undefined);
     };
   }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const nextTheme = getCurrentMapTheme();
+      setMapTheme((current) => (current === nextTheme ? current : nextTheme));
+    }, 60 * 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!map) return;
+
+    map.setOptions({
+      backgroundColor: mapBackgroundColor(mapTheme),
+      styles: mapStylesForTheme(mapTheme)
+    });
+  }, [map, mapTheme]);
 
   useEffect(() => {
     if (!map) return;
@@ -580,4 +706,26 @@ function padBounds(bounds: google.maps.LatLngBoundsLiteral, ratio: number): goog
 
 function isWithinBounds(item: { lat: number; lon: number }, bounds: google.maps.LatLngBoundsLiteral) {
   return item.lat >= bounds.south && item.lat <= bounds.north && item.lon >= bounds.west && item.lon <= bounds.east;
+}
+
+function getCurrentMapTheme(date = new Date()): MapTheme {
+  const hour = getTaiwanHour(date);
+  return hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR ? "day" : "night";
+}
+
+function getTaiwanHour(date: Date) {
+  const hour = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    hourCycle: "h23",
+    timeZone: TAIWAN_TIME_ZONE
+  }).format(date);
+  return Number(hour);
+}
+
+function mapStylesForTheme(theme: MapTheme) {
+  return theme === "night" ? nightMapStyles : dayMapStyles;
+}
+
+function mapBackgroundColor(theme: MapTheme) {
+  return theme === "night" ? "#111827" : "#e5f1f0";
 }
