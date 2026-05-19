@@ -4,6 +4,7 @@ import { fetchJson } from "../http.js";
 import type { AqiSummary, EnvironmentSummary, SourceError, WaterLevelSummary, WeatherSummary } from "../types.js";
 
 const ENVIRONMENT_TTL_MS = 45 * 60 * 1000;
+const TAIWAN_UTC_OFFSET_HOURS = 8;
 const TAIWAN_BOUNDS = {
   maxLat: 27,
   maxLon: 123,
@@ -112,11 +113,12 @@ async function loadWeather(county: string): Promise<WeatherSummary | undefined> 
   }
 
   const elements = Array.isArray(location.weatherElement) ? location.weatherElement : [];
-  const wx = pickWeatherValue(elements, "Wx");
-  const minT = toNumber(pickWeatherValue(elements, "MinT"));
-  const maxT = toNumber(pickWeatherValue(elements, "MaxT"));
-  const pop = toNumber(pickWeatherValue(elements, "PoP"));
-  const comfort = pickWeatherValue(elements, "CI");
+  const forecastTime = new Date();
+  const wx = pickWeatherValue(elements, "Wx", forecastTime);
+  const minT = toNumber(pickWeatherValue(elements, "MinT", forecastTime));
+  const maxT = toNumber(pickWeatherValue(elements, "MaxT", forecastTime));
+  const pop = toNumber(pickWeatherValue(elements, "PoP", forecastTime));
+  const comfort = pickWeatherValue(elements, "CI", forecastTime);
 
   return {
     county,
@@ -333,17 +335,47 @@ function pickFirstLocation(payload: unknown): Record<string, unknown> | undefine
   return Array.isArray(locations) && isRecord(locations[0]) ? locations[0] : undefined;
 }
 
-function pickWeatherValue(elements: unknown[], name: string): string {
+export function pickWeatherValue(elements: unknown[], name: string, targetTime = new Date()): string {
   const element = elements.find((item) => isRecord(item) && item.elementName === name);
   if (!isRecord(element) || !Array.isArray(element.time)) {
     return "";
   }
-  const firstTime = element.time.find(isRecord);
-  if (!firstTime || !isRecord(firstTime.parameter)) {
+  const timeBlock = pickCurrentWeatherTimeBlock(element.time, targetTime);
+  if (!timeBlock || !isRecord(timeBlock.parameter)) {
     return "";
   }
-  const parameter = firstTime.parameter;
+  const parameter = timeBlock.parameter;
   return stringField(parameter, "parameterName", "parameterValue");
+}
+
+function pickCurrentWeatherTimeBlock(times: unknown[], targetTime: Date): Record<string, unknown> | undefined {
+  const timeBlocks = times.filter(isRecord);
+  const targetMs = targetTime.getTime();
+  return (
+    timeBlocks.find((timeBlock) => {
+      const startMs = parseTaiwanForecastTime(stringField(timeBlock, "startTime"));
+      const endMs = parseTaiwanForecastTime(stringField(timeBlock, "endTime"));
+      return startMs !== undefined && endMs !== undefined && targetMs >= startMs && targetMs < endMs;
+    }) ?? timeBlocks[0]
+  );
+}
+
+function parseTaiwanForecastTime(value: string): number | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (match) {
+    const [, year, month, day, hour, minute, second = "0"] = match;
+    return Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour) - TAIWAN_UTC_OFFSET_HOURS,
+      Number(minute),
+      Number(second)
+    );
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function pickRecords(payload: unknown): Record<string, unknown>[] {
