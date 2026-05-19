@@ -63,6 +63,7 @@ export default function App() {
   const [placesError, setPlacesError] = useState("");
   const [environment, setEnvironment] = useState<EnvironmentSummary | undefined>();
   const [mapEnvironment, setMapEnvironment] = useState<EnvironmentSummary | undefined>();
+  const [mapRainfall, setMapRainfall] = useState<RainfallResponse | undefined>();
   const [nearbyTourism, setNearbyTourism] = useState<NearbyTourismResponse | undefined>();
   const [query, setQuery] = useState("");
   const [cameraFilter, setCameraFilter] = useState<CameraFilter>("all");
@@ -87,6 +88,7 @@ export default function App() {
   const [environmentError, setEnvironmentError] = useState("");
   const [mapEnvironmentError, setMapEnvironmentError] = useState("");
   const [mapEnvironmentLoading, setMapEnvironmentLoading] = useState(false);
+  const [mapRainfallLoading, setMapRainfallLoading] = useState(false);
   const [nearbyTourismError, setNearbyTourismError] = useState("");
   const [nearbyTourismLoading, setNearbyTourismLoading] = useState(false);
   const [radarOverlay, setRadarOverlay] = useState<RadarOverlayResponse | undefined>();
@@ -230,6 +232,32 @@ export default function App() {
       })
       .finally(() => {
         if (active) setMapEnvironmentLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [manualRefreshKey, mapDataTarget]);
+
+  useEffect(() => {
+    setMapRainfall(undefined);
+
+    if (!mapDataTarget) {
+      setMapRainfallLoading(false);
+      return;
+    }
+
+    let active = true;
+    setMapRainfallLoading(true);
+    getRainfallNearby(mapDataTarget.lat, mapDataTarget.lon, 15000, 3)
+      .then((value) => {
+        if (active) setMapRainfall(value);
+      })
+      .catch(() => {
+        if (active) setMapRainfall(undefined);
+      })
+      .finally(() => {
+        if (active) setMapRainfallLoading(false);
       });
 
     return () => {
@@ -1932,6 +1960,8 @@ export default function App() {
         error={mapEnvironmentError}
         loading={mapEnvironmentLoading}
         onToggleTheme={toggleTimeThemePreference}
+        rainfall={mapRainfall}
+        rainfallLoading={mapRainfallLoading}
         target={mapDataTarget}
         theme={timeTheme}
       />
@@ -2153,6 +2183,8 @@ function MapHud({
   error,
   loading,
   onToggleTheme,
+  rainfall,
+  rainfallLoading,
   target,
   theme
 }: {
@@ -2160,6 +2192,8 @@ function MapHud({
   error: string;
   loading: boolean;
   onToggleTheme: () => void;
+  rainfall?: RainfallResponse;
+  rainfallLoading: boolean;
   target?: ObservationTarget;
   theme: TimeTheme;
 }) {
@@ -2188,6 +2222,8 @@ function MapHud({
           legendId={legendId}
           loading={loading}
           onToggle={() => interactive && setExpanded((current) => !current)}
+          rainfall={rainfall}
+          rainfallLoading={rainfallLoading}
           target={target}
         />
         <button
@@ -2215,6 +2251,8 @@ function MapWeatherChip({
   legendId,
   loading,
   onToggle,
+  rainfall,
+  rainfallLoading,
   target
 }: {
   environment?: EnvironmentSummary;
@@ -2224,6 +2262,8 @@ function MapWeatherChip({
   legendId: string;
   loading: boolean;
   onToggle: () => void;
+  rainfall?: RainfallResponse;
+  rainfallLoading: boolean;
   target?: ObservationTarget;
 }) {
   if (!target) {
@@ -2237,7 +2277,7 @@ function MapWeatherChip({
   const title = weather?.description || error || target.title;
   const content = (
     <>
-      {weatherIcon(weather)}
+      {weatherIcon(weather, rainfall, rainfallLoading)}
       <span>{loading ? "天氣更新中" : environment?.county || target.title}</span>
       <strong>{loading ? "..." : formatWeatherTemperature(weather)}</strong>
       <small>{hasWarning ? "天氣暫停" : formatWeatherRain(weather)}</small>
@@ -2272,16 +2312,35 @@ function MapWeatherChip({
   );
 }
 
-function weatherIcon(weather?: EnvironmentSummary["weather"]) {
+function weatherIcon(weather?: EnvironmentSummary["weather"], rainfall?: RainfallResponse, rainfallLoading = false) {
   const description = weather?.description ?? "";
-  const rainProbability = weather?.rainProbability ?? 0;
-  if (rainProbability >= 50 || description.includes("雨")) {
+  const rainProbability = weather?.rainProbability;
+  const observedRain = hasCurrentObservedRain(rainfall);
+
+  if (observedRain === true) {
+    return <CloudRain size={16} />;
+  }
+  if (!rainfallLoading && observedRain === undefined && ((rainProbability ?? 0) >= 50 || description.includes("雨"))) {
     return <CloudRain size={16} />;
   }
   if (description.includes("晴")) {
     return <Sun size={16} />;
   }
   return <CloudSun size={16} />;
+}
+
+function hasCurrentObservedRain(rainfall?: RainfallResponse) {
+  const station = rainfall?.stations[0];
+  if (!station) {
+    return undefined;
+  }
+
+  const recentRainValues = [station.rain10Min, station.rain1Hour].filter((value): value is number => value !== undefined);
+  if (!recentRainValues.length) {
+    return undefined;
+  }
+
+  return recentRainValues.some((value) => value > 0);
 }
 
 function formatWeatherTemperature(weather?: EnvironmentSummary["weather"]) {
