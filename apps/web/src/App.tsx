@@ -8,6 +8,7 @@ import {
   Layers,
   LocateFixed,
   MapPin,
+  Moon,
   RefreshCw,
   Search,
   Sun,
@@ -21,6 +22,7 @@ import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
 import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
 import { GOOGLE_MAPS_API_KEY, loadGooglePlaces, searchGoogleNearbyRestaurants } from "./googleMaps";
+import { getCurrentTimeTheme, type TimeTheme } from "./timeTheme";
 import type {
   Camera,
   CameraCatalogResponse,
@@ -45,6 +47,7 @@ const cameraFilterOptions: Array<{ id: CameraFilter; label: string }> = [
 ];
 
 const favoriteStorageKey = "taiwan-live-cam:favorites";
+const timeThemeStorageKey = "taiwan-live-cam:time-theme";
 type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
 type MobileSheet = "search" | "layers" | "rain" | "nearby" | "favorites" | "detail";
@@ -105,6 +108,8 @@ export default function App() {
   const [mobileSheetDragOffset, setMobileSheetDragOffset] = useState(0);
   const [mapViewportTarget, setMapViewportTarget] = useState<ObservationTarget | undefined>();
   const [mapDataTarget, setMapDataTarget] = useState<ObservationTarget | undefined>();
+  const [autoTimeTheme, setAutoTimeTheme] = useState<TimeTheme>(() => getCurrentTimeTheme());
+  const [themeOverride, setThemeOverride] = useState<TimeTheme | undefined>(() => loadTimeThemePreference());
   const [showPanelTopButton, setShowPanelTopButton] = useState(false);
   const [manualRefreshKey, setManualRefreshKey] = useState(0);
   const locationRequestInFlight = useRef(false);
@@ -154,6 +159,17 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(favoriteStorageKey, JSON.stringify([...favorites]));
   }, [favorites]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const nextTheme = getCurrentTimeTheme();
+      setAutoTimeTheme((current) => (current === nextTheme ? current : nextTheme));
+    }, 60 * 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!mapViewportTarget) {
@@ -1397,10 +1413,20 @@ export default function App() {
     );
   }
 
+  function toggleTimeThemePreference() {
+    setThemeOverride((current) => {
+      const activeTheme = current ?? autoTimeTheme;
+      const nextTheme = activeTheme === "night" ? "day" : "night";
+      saveTimeThemePreference(nextTheme);
+      return nextTheme;
+    });
+  }
+
   const activeMobileContextSheet = activeMobileSheet && activeMobileSheet !== "detail" ? activeMobileSheet : undefined;
+  const timeTheme = themeOverride ?? autoTimeTheme;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell theme-${timeTheme}`} data-theme={timeTheme}>
       <CameraMap
         cameras={filteredCameras}
         vehicleDetectors={isFocusedList ? [] : filteredVehicleDetectors}
@@ -1412,6 +1438,7 @@ export default function App() {
         userLocation={userLocation}
         userLocationFocusRequest={userLocationFocusRequest}
         followUserLocation={locationFollowActive}
+        theme={timeTheme}
         focusCameras={focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
         onSelectVehicleDetector={selectVehicleDetector}
@@ -1904,7 +1931,9 @@ export default function App() {
         environment={mapEnvironment}
         error={mapEnvironmentError}
         loading={mapEnvironmentLoading}
+        onToggleTheme={toggleTimeThemePreference}
         target={mapDataTarget}
+        theme={timeTheme}
       />
     </main>
   );
@@ -2123,12 +2152,16 @@ function MapHud({
   environment,
   error,
   loading,
-  target
+  onToggleTheme,
+  target,
+  theme
 }: {
   environment?: EnvironmentSummary;
   error: string;
   loading: boolean;
+  onToggleTheme: () => void;
   target?: ObservationTarget;
+  theme: TimeTheme;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [interactive, setInteractive] = useState(false);
@@ -2146,16 +2179,27 @@ function MapHud({
 
   return (
     <div className={className} aria-label="地圖資訊">
-      <MapWeatherChip
-        environment={environment}
-        error={error}
-        expanded={expanded}
-        interactive={interactive}
-        legendId={legendId}
-        loading={loading}
-        onToggle={() => interactive && setExpanded((current) => !current)}
-        target={target}
-      />
+      <div className="map-hud-row">
+        <MapWeatherChip
+          environment={environment}
+          error={error}
+          expanded={expanded}
+          interactive={interactive}
+          legendId={legendId}
+          loading={loading}
+          onToggle={() => interactive && setExpanded((current) => !current)}
+          target={target}
+        />
+        <button
+          className="map-theme-toggle"
+          type="button"
+          aria-label={theme === "night" ? "切換為日間模式" : "切換為夜間模式"}
+          title={theme === "night" ? "切換為日間模式" : "切換為夜間模式"}
+          onClick={onToggleTheme}
+        >
+          {theme === "night" ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+      </div>
       <div className="map-hud-legend" id={legendId}>
         <MapLegend />
       </div>
@@ -2383,6 +2427,27 @@ function loadFavorites(): Set<string> {
   } catch {
     return new Set();
   }
+}
+
+function loadTimeThemePreference(): TimeTheme | undefined {
+  try {
+    const value = localStorage.getItem(timeThemeStorageKey);
+    return isTimeTheme(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveTimeThemePreference(theme: TimeTheme) {
+  try {
+    localStorage.setItem(timeThemeStorageKey, theme);
+  } catch {
+    // Ignore private-mode or quota failures; the current session still updates.
+  }
+}
+
+function isTimeTheme(value: unknown): value is TimeTheme {
+  return value === "day" || value === "night";
 }
 
 function roundedObservationTarget(target: ObservationTarget): ObservationTarget {

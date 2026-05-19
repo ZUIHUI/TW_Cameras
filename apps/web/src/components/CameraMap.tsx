@@ -1,16 +1,12 @@
 import { MarkerClusterer, SuperClusterViewportAlgorithm } from "@googlemaps/markerclusterer";
 import { useEffect, useRef, useState } from "react";
 import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
+import type { TimeTheme } from "../timeTheme";
 import type { Camera, RadarOverlayResponse, SearchPlace, VehicleDetector } from "../types";
 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
-const TAIWAN_TIME_ZONE = "Asia/Taipei";
 const USER_LOCATION_RADIUS_METERS = 500;
 const VIEWPORT_PADDING_RATIO = 0.35;
-const NIGHT_START_HOUR = 18;
-const DAY_START_HOUR = 6;
-
-type MapTheme = "day" | "night";
 
 const markerColors: Record<Camera["category"] | "traffic", string> = {
   freeway: "#0e6b52",
@@ -128,6 +124,7 @@ interface CameraMapProps {
   userLocation?: { lat: number; lon: number };
   userLocationFocusRequest?: number;
   followUserLocation?: boolean;
+  theme: TimeTheme;
   focusCameras?: Camera[];
   onSelectCamera: (camera: Camera) => void;
   onSelectVehicleDetector?: (vd: VehicleDetector) => void;
@@ -157,6 +154,7 @@ export function CameraMap({
   userLocation,
   userLocationFocusRequest,
   followUserLocation = false,
+  theme,
   focusCameras,
   onSelectCamera,
   onSelectVehicleDetector,
@@ -178,7 +176,6 @@ export function CameraMap({
   const lastUserLocationFocusRequestRef = useRef(userLocationFocusRequest);
   const lastFollowPanKeyRef = useRef("");
   const [map, setMap] = useState<google.maps.Map | undefined>();
-  const [mapTheme, setMapTheme] = useState<MapTheme>(() => getCurrentMapTheme());
   const [viewportBounds, setViewportBounds] = useState<google.maps.LatLngBoundsLiteral | undefined>();
   const [loadError, setLoadError] = useState("");
 
@@ -246,9 +243,8 @@ export function CameraMap({
       .then(({ Map }) => {
         if (cancelled || !mapElementRef.current) return;
 
-        const initialMapTheme = getCurrentMapTheme();
         const nextMap = new Map(mapElementRef.current, {
-          backgroundColor: mapBackgroundColor(initialMapTheme),
+          backgroundColor: mapBackgroundColor(theme),
           center: TAIWAN_CENTER,
           clickableIcons: false,
           fullscreenControl: false,
@@ -257,7 +253,7 @@ export function CameraMap({
           maxZoom: 18,
           minZoom: 6,
           streetViewControl: false,
-          styles: mapStylesForTheme(initialMapTheme),
+          styles: mapStylesForTheme(theme),
           zoom: 7
         });
 
@@ -276,24 +272,13 @@ export function CameraMap({
   }, []);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      const nextTheme = getCurrentMapTheme();
-      setMapTheme((current) => (current === nextTheme ? current : nextTheme));
-    }, 60 * 1000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!map) return;
 
     map.setOptions({
-      backgroundColor: mapBackgroundColor(mapTheme),
-      styles: mapStylesForTheme(mapTheme)
+      backgroundColor: mapBackgroundColor(theme),
+      styles: mapStylesForTheme(theme)
     });
-  }, [map, mapTheme]);
+  }, [map, theme]);
 
   useEffect(() => {
     if (!map) return;
@@ -708,24 +693,10 @@ function isWithinBounds(item: { lat: number; lon: number }, bounds: google.maps.
   return item.lat >= bounds.south && item.lat <= bounds.north && item.lon >= bounds.west && item.lon <= bounds.east;
 }
 
-function getCurrentMapTheme(date = new Date()): MapTheme {
-  const hour = getTaiwanHour(date);
-  return hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR ? "day" : "night";
-}
-
-function getTaiwanHour(date: Date) {
-  const hour = new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    hourCycle: "h23",
-    timeZone: TAIWAN_TIME_ZONE
-  }).format(date);
-  return Number(hour);
-}
-
-function mapStylesForTheme(theme: MapTheme) {
+function mapStylesForTheme(theme: TimeTheme) {
   return theme === "night" ? nightMapStyles : dayMapStyles;
 }
 
-function mapBackgroundColor(theme: MapTheme) {
+function mapBackgroundColor(theme: TimeTheme) {
   return theme === "night" ? "#111827" : "#e5f1f0";
 }

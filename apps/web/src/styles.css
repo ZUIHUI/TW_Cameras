@@ -35,10 +35,56 @@ input:disabled {
 }
 
 .app-shell {
+  --ui-text: #14201c;
+  --ui-heading: #10231c;
+  --ui-muted: #60726c;
+  --ui-subtle: #53655f;
+  --ui-panel-bg: rgba(250, 253, 251, 0.96);
+  --ui-panel-bg-strong: #ffffff;
+  --ui-panel-bg-soft: #f7fbf8;
+  --ui-panel-bg-muted: #f2f7f4;
+  --ui-border: rgba(37, 66, 55, 0.12);
+  --ui-border-strong: rgba(31, 75, 58, 0.14);
+  --ui-shadow: 0 18px 48px rgba(22, 41, 33, 0.18);
+  --ui-primary: #11674d;
+  --ui-primary-strong: #0e5742;
+  --ui-primary-soft: #eef9f4;
+  --ui-rain: #1d4f8f;
+  --ui-warning-bg: #fff8e6;
+  --ui-warning-text: #744b00;
+  --ui-warning-border: #f3d78a;
+  --ui-error-bg: #fff1ee;
+  --ui-error-text: #842116;
+  --ui-error-border: #ffc8bf;
   position: relative;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+}
+
+.app-shell.theme-night {
+  --ui-text: #e5f2ed;
+  --ui-heading: #f8fafc;
+  --ui-muted: #9fb2ab;
+  --ui-subtle: #bdcbc6;
+  --ui-panel-bg: rgba(17, 28, 34, 0.92);
+  --ui-panel-bg-strong: rgba(24, 38, 45, 0.96);
+  --ui-panel-bg-soft: rgba(22, 35, 42, 0.94);
+  --ui-panel-bg-muted: rgba(29, 47, 55, 0.92);
+  --ui-border: rgba(179, 208, 197, 0.16);
+  --ui-border-strong: rgba(197, 224, 214, 0.22);
+  --ui-shadow: 0 22px 54px rgba(0, 0, 0, 0.42);
+  --ui-primary: #28b986;
+  --ui-primary-strong: #34d399;
+  --ui-primary-soft: rgba(40, 185, 134, 0.18);
+  --ui-rain: #60a5fa;
+  --ui-warning-bg: rgba(133, 91, 14, 0.26);
+  --ui-warning-text: #f6d98a;
+  --ui-warning-border: rgba(246, 217, 138, 0.36);
+  --ui-error-bg: rgba(127, 29, 29, 0.3);
+  --ui-error-text: #fecaca;
+  --ui-error-border: rgba(252, 165, 165, 0.38);
+  color-scheme: dark;
 }
 
 .map-canvas {
@@ -1247,8 +1293,17 @@ h3 {
   pointer-events: auto;
 }
 
+.map-hud-row {
+  max-width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 8px;
+}
+
 .map-weather-chip,
-.map-legend {
+.map-legend,
+.map-theme-toggle {
   border: 1px solid rgba(31, 75, 58, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.93);
@@ -1267,6 +1322,17 @@ h3 {
   font-weight: 800;
   font-family: inherit;
   cursor: default;
+}
+
+.map-theme-toggle {
+  appearance: none;
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  font-family: inherit;
 }
 
 .map-weather-chip.warning {
@@ -1735,19 +1801,32 @@ h3 {
     pointer-events: auto;
   }
 
+  .map-hud-row {
+    width: 100%;
+    gap: 0;
+  }
+
   .map-weather-chip,
   .map-weather-chip.warning,
-  .map-legend {
+  .map-legend,
+  .map-theme-toggle {
     border: 0;
     border-radius: 0;
     background: transparent;
   }
 
   .map-weather-chip {
-    width: 100%;
+    flex: 1 1 auto;
+    width: auto;
     min-height: 40px;
     padding: 0 10px;
     cursor: pointer;
+  }
+
+  .map-theme-toggle {
+    width: 40px;
+    min-width: 40px;
+    min-height: 40px;
   }
 
   .map-weather-chip span {
@@ -1833,5 +1912,307 @@ h3 {
     font-size: 11px;
     gap: 5px;
     padding: 7px 8px;
+  }
+}
+
+.app-shell.theme-night {
+  color: var(--ui-text);
+}
+
+.app-shell.theme-night .map-canvas {
+  background: #111827;
+}
+
+.app-shell.theme-night .control-panel,
+.app-shell.theme-night .detail-panel,
+.app-shell.theme-night .mobile-bottom-nav,
+.app-shell.theme-night .mobile-context-sheet {
+  background: var(--ui-panel-bg);
+  border-color: var(--ui-border);
+  box-shadow: var(--ui-shadow);
+}
+
+.app-shell.theme-night .map-empty-state,
+.app-shell.theme-night .control-panel,
+.app-shell.theme-night .detail-panel,
+.app-shell.theme-night .mobile-context-sheet,
+.app-shell.theme-night .mobile-bottom-nav {
+  color: var(--ui-text);
+}
+
+.app-shell.theme-night h1,
+.app-shell.theme-night h2,
+.app-shell.theme-night h3,
+.app-shell.theme-night .panel-title,
+.app-shell.theme-night .mobile-sheet-header > div,
+.app-shell.theme-night .tourism-title,
+.app-shell.theme-night .nearby-recommendation-toggle,
+.app-shell.theme-night .layer-toggle strong,
+.app-shell.theme-night .summary-strip strong,
+.app-shell.theme-night .rain-status-grid strong,
+.app-shell.theme-night .fact-grid strong,
+.app-shell.theme-night .environment-grid strong,
+.app-shell.theme-night .tourism-item-heading strong,
+.app-shell.theme-night .camera-item,
+.app-shell.theme-night .search-result-item {
+  color: var(--ui-heading);
+}
+
+.app-shell.theme-night .eyebrow,
+.app-shell.theme-night .meta-row,
+.app-shell.theme-night .detail-header p,
+.app-shell.theme-night .summary-strip span,
+.app-shell.theme-night .layer-toggle small,
+.app-shell.theme-night .category-stats,
+.app-shell.theme-night .section-label,
+.app-shell.theme-night .radar-opacity-control span,
+.app-shell.theme-night .radar-opacity-control strong,
+.app-shell.theme-night .radar-legend,
+.app-shell.theme-night .rainfall-station-strip,
+.app-shell.theme-night .rain-data-health,
+.app-shell.theme-night .rain-target-label,
+.app-shell.theme-night .rain-status-grid span,
+.app-shell.theme-night .rain-status-grid small,
+.app-shell.theme-night .fact-grid span,
+.app-shell.theme-night .environment-grid span,
+.app-shell.theme-night .environment-grid small,
+.app-shell.theme-night .tourism-title span,
+.app-shell.theme-night .tourism-item small,
+.app-shell.theme-night .tourism-item p,
+.app-shell.theme-night .muted,
+.app-shell.theme-night .camera-copy small,
+.app-shell.theme-night .empty-state,
+.app-shell.theme-night .search-result-item small,
+.app-shell.theme-night .search-result-note,
+.app-shell.theme-night .map-empty-state span {
+  color: var(--ui-muted);
+}
+
+.app-shell.theme-night .icon-button,
+.app-shell.theme-night .clear-button,
+.app-shell.theme-night .action-button,
+.app-shell.theme-night .chip,
+.app-shell.theme-night .summary-strip div,
+.app-shell.theme-night .layer-toggle,
+.app-shell.theme-night .category-stats span,
+.app-shell.theme-night .radar-controls,
+.app-shell.theme-night .rain-status-grid div,
+.app-shell.theme-night .rainfall-station-strip span,
+.app-shell.theme-night .camera-item,
+.app-shell.theme-night .stream-source-link,
+.app-shell.theme-night .fact-grid div,
+.app-shell.theme-night .environment-grid div,
+.app-shell.theme-night .tourism-item,
+.app-shell.theme-night .mobile-favorites-summary {
+  background: var(--ui-panel-bg-strong);
+  border-color: var(--ui-border-strong);
+  color: var(--ui-text);
+}
+
+.app-shell.theme-night .search-box,
+.app-shell.theme-night .layer-panel,
+.app-shell.theme-night .rain-status-panel,
+.app-shell.theme-night .tourism-block.compact,
+.app-shell.theme-night .nearby-recommendation-frame {
+  background: var(--ui-panel-bg-soft);
+  border-color: var(--ui-border);
+  color: var(--ui-text);
+}
+
+.app-shell.theme-night .search-box {
+  color: var(--ui-muted);
+}
+
+.app-shell.theme-night .search-box input {
+  color: var(--ui-heading);
+}
+
+.app-shell.theme-night .search-results {
+  background: rgba(17, 28, 34, 0.98);
+  border-color: var(--ui-border-strong);
+  box-shadow: var(--ui-shadow);
+}
+
+.app-shell.theme-night .search-result-item:hover,
+.app-shell.theme-night .stream-source-link:hover {
+  background: var(--ui-primary-soft);
+}
+
+.app-shell.theme-night .search-result-item.place:hover {
+  background: rgba(96, 165, 250, 0.17);
+}
+
+.app-shell.theme-night .chip.active,
+.app-shell.theme-night .action-button.active,
+.app-shell.theme-night .action-button:active,
+.app-shell.theme-night .mobile-nav-button.active {
+  color: #ffffff;
+  background: #118060;
+  border-color: #118060;
+}
+
+.app-shell.theme-night .action-button.rain.active,
+.app-shell.theme-night .mobile-nav-button.active.rain {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.app-shell.theme-night .layer-toggle.active,
+.app-shell.theme-night .camera-item.active {
+  background: var(--ui-primary-soft);
+  border-color: rgba(52, 211, 153, 0.48);
+}
+
+.app-shell.theme-night .camera-item.traffic.active {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(167, 139, 250, 0.52);
+}
+
+.app-shell.theme-night .toggle-indicator {
+  border-color: rgba(197, 224, 214, 0.32);
+  color: var(--ui-primary-strong);
+}
+
+.app-shell.theme-night .layer-toggle.active .toggle-indicator {
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+  box-shadow: inset 0 0 0 4px rgba(17, 28, 34, 0.96);
+}
+
+.app-shell.theme-night .radar-status,
+.app-shell.theme-night .rain-data-health,
+.app-shell.theme-night .camera-distance {
+  background: var(--ui-primary-soft);
+  border-color: rgba(52, 211, 153, 0.26);
+  color: #9cf0cf;
+}
+
+.app-shell.theme-night .radar-status.warning,
+.app-shell.theme-night .rain-data-health.warning,
+.app-shell.theme-night .status-message.warning,
+.app-shell.theme-night .source-health.partial,
+.app-shell.theme-night .tourism-source-warning,
+.app-shell.theme-night .map-weather-chip.warning {
+  background: var(--ui-warning-bg);
+  border-color: var(--ui-warning-border);
+  color: var(--ui-warning-text);
+}
+
+.app-shell.theme-night .status-message.error,
+.app-shell.theme-night .source-health.unavailable {
+  background: var(--ui-error-bg);
+  border-color: var(--ui-error-border);
+  color: var(--ui-error-text);
+}
+
+.app-shell.theme-night .source-health-toggle,
+.app-shell.theme-night .source-error-list li {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.app-shell.theme-night .source-health-toggle:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.app-shell.theme-night .mobile-nav-button {
+  color: var(--ui-muted);
+}
+
+.app-shell.theme-night .mobile-sheet-handle::before,
+.app-shell.theme-night .control-panel-handle::before {
+  background: rgba(197, 224, 214, 0.48);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.app-shell.theme-night .control-panel-handle {
+  background: rgba(17, 28, 34, 0.86);
+}
+
+.app-shell.theme-night .panel-top-button {
+  background: #118060;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.36);
+}
+
+.app-shell.theme-night .map-weather-chip,
+.app-shell.theme-night .map-legend,
+.app-shell.theme-night .map-theme-toggle {
+  background: rgba(17, 28, 34, 0.88);
+  border-color: var(--ui-border-strong);
+  color: var(--ui-text);
+}
+
+.app-shell.theme-night .map-hud {
+  color: var(--ui-text);
+}
+
+.app-shell.theme-night .map-aqi-badge {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.app-shell.theme-night .map-aqi-badge.good {
+  background: rgba(22, 163, 74, 0.24);
+  color: #bbf7d0;
+}
+
+.app-shell.theme-night .map-aqi-badge.moderate {
+  background: rgba(202, 138, 4, 0.24);
+  color: #fde68a;
+}
+
+.app-shell.theme-night .map-aqi-badge.sensitive {
+  background: rgba(234, 88, 12, 0.25);
+  color: #fed7aa;
+}
+
+.app-shell.theme-night .map-aqi-badge.unhealthy {
+  background: rgba(220, 38, 38, 0.26);
+  color: #fecaca;
+}
+
+.app-shell.theme-night .tourism-item img {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.app-shell.theme-night .tourism-item-heading span,
+.app-shell.theme-night .tourism-links a,
+.app-shell.theme-night .nearby-recommendation-toggle strong,
+.app-shell.theme-night .detail-footer span,
+.app-shell.theme-night .stream-source-link {
+  color: var(--ui-primary-strong);
+}
+
+.app-shell.theme-night .favorite-mark {
+  color: #facc15;
+}
+
+.app-shell.theme-night .stream-frame.webpage iframe {
+  background: #ffffff;
+}
+
+@media (max-width: 980px) {
+  .app-shell.theme-night .mobile-bottom-nav {
+    background: rgba(17, 28, 34, 0.94);
+  }
+
+  .app-shell.theme-night .mobile-context-sheet {
+    background: rgba(17, 28, 34, 0.96);
+  }
+
+  .app-shell.theme-night .map-hud {
+    background: rgba(17, 28, 34, 0.9);
+    border-color: var(--ui-border-strong);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.34);
+  }
+
+  .app-shell.theme-night .map-weather-chip,
+  .app-shell.theme-night .map-weather-chip.warning,
+  .app-shell.theme-night .map-legend,
+  .app-shell.theme-night .map-theme-toggle {
+    background: transparent;
+    border: 0;
+  }
+
+  .app-shell.theme-night .map-hud-legend {
+    border-top-color: var(--ui-border);
   }
 }
