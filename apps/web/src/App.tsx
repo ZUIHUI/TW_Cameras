@@ -1,5 +1,4 @@
 import {
-  Activity,
   AlertCircle,
   ArrowUp,
   CloudSun,
@@ -34,7 +33,6 @@ import type {
   RainfallResponse,
   SearchPlace,
   UserLocation,
-  VehicleDetector,
   VisibleLayers
 } from "./types";
 
@@ -58,7 +56,6 @@ const MOBILE_BREAKPOINT_QUERY = "(max-width: 980px)";
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
   const [selectedCamera, setSelectedCamera] = useState<Camera | undefined>();
-  const [selectedVehicleDetector, setSelectedVehicleDetector] = useState<VehicleDetector | undefined>();
   const [searchPlace, setSearchPlace] = useState<SearchPlace | undefined>();
   const [placePredictions, setPlacePredictions] = useState<google.maps.places.AutocompletePrediction[]>([]);
   const [placesError, setPlacesError] = useState("");
@@ -71,8 +68,7 @@ export default function App() {
   const [focusedListFilter, setFocusedListFilter] = useState<FocusedListFilter | undefined>();
   const [visibleLayers, setVisibleLayers] = useState<VisibleLayers>({
     cameras: true,
-    radar: false,
-    vehicleDetectors: true
+    radar: false
   });
   const [rainModeActive, setRainModeActive] = useState(false);
   const [radarOpacity, setRadarOpacity] = useState(0.68);
@@ -419,7 +415,7 @@ export default function App() {
 
   useEffect(() => {
     setVisibleCount(80);
-  }, [cameraFilter, query, rainModeActive, rainObservationTarget, visibleLayers.cameras, visibleLayers.vehicleDetectors]);
+  }, [cameraFilter, query, rainModeActive, rainObservationTarget, visibleLayers.cameras]);
 
   useEffect(() => {
     const keyword = query.trim();
@@ -491,7 +487,6 @@ export default function App() {
 
     if (shouldClearContext) {
       setSelectedCamera(undefined);
-      setSelectedVehicleDetector(undefined);
       setSearchPlace(undefined);
       setPlacePredictions([]);
       setPlacesError("");
@@ -620,9 +615,6 @@ export default function App() {
         setSelectedCamera(undefined);
         setFocusedListFilter(undefined);
       }
-      if (layer === "vehicleDetectors" && current.vehicleDetectors) {
-        setSelectedVehicleDetector(undefined);
-      }
 
       return next;
     });
@@ -637,8 +629,7 @@ export default function App() {
         setVisibleLayers((layers) => ({
           ...layers,
           cameras: true,
-          radar: true,
-          vehicleDetectors: true
+          radar: true
         }));
         setFocusedListFilter(undefined);
 
@@ -661,14 +652,6 @@ export default function App() {
   function selectCamera(camera: Camera) {
     pauseLocationFollow();
     setSelectedCamera(camera);
-    setSelectedVehicleDetector(undefined);
-    setActiveMobileSheet("detail");
-  }
-
-  function selectVehicleDetector(vehicleDetector: VehicleDetector) {
-    pauseLocationFollow();
-    setSelectedVehicleDetector(vehicleDetector);
-    setSelectedCamera(undefined);
     setActiveMobileSheet("detail");
   }
 
@@ -678,7 +661,6 @@ export default function App() {
     if (filter === "scenic" || filter === "favorites") {
       setVisibleLayers((current) => ({ ...current, cameras: true }));
       setSelectedCamera(undefined);
-      setSelectedVehicleDetector(undefined);
       setSearchPlace(undefined);
       setPlacePredictions([]);
       setPlacesError("");
@@ -726,34 +708,6 @@ export default function App() {
     return filtered;
   }, [catalog?.cameras, cameraFilter, favorites, query, rainModeActive, rainObservationTarget, searchPlace, userLocation, visibleLayers.cameras]);
 
-  const filteredVehicleDetectors = useMemo(() => {
-    if (!visibleLayers.vehicleDetectors) {
-      return [];
-    }
-
-    const normalizedQuery = normalize(query);
-    const allVehicleDetectors = catalog?.vehicleDetectors ?? [];
-    const activeLocation = searchPlace || userLocation;
-    const rainSortLocation = rainModeActive ? rainObservationTarget : undefined;
-    const shouldFilterText = Boolean(normalizedQuery && !searchPlace);
-    const filtered = allVehicleDetectors.filter((vd) => {
-      if (!shouldFilterText) return true;
-
-      return normalize([vd.title, vd.roadName, vd.roadSection.start, vd.roadSection.end, vd.source].join(" ")).includes(
-        normalizedQuery
-      );
-    });
-
-    const sortLocation = rainSortLocation || (cameraFilter === "nearby" ? activeLocation : undefined);
-    if (sortLocation) {
-      return [...filtered]
-        .sort((a, b) => distanceKm(sortLocation, a) - distanceKm(sortLocation, b))
-        .slice(0, 160);
-    }
-
-    return filtered;
-  }, [cameraFilter, catalog?.vehicleDetectors, query, rainModeActive, rainObservationTarget, searchPlace, userLocation, visibleLayers.vehicleDetectors]);
-
   const localSearchMatches = useMemo(() => {
     const normalizedQuery = normalize(query);
     if (!normalizedQuery || searchPlace) {
@@ -768,13 +722,9 @@ export default function App() {
       )
       .slice(0, 8)
       .map((camera) => ({ id: camera.id, kind: "camera" as const, title: camera.title, subtitle: formatCountyTown(camera), item: camera }));
-    const vdMatches = (catalog?.vehicleDetectors ?? [])
-      .filter((vd) => normalize([vd.title, vd.roadName, vd.roadSection.start, vd.roadSection.end, vd.source].join(" ")).includes(normalizedQuery))
-      .slice(0, Math.max(0, 8 - cameraMatches.length))
-      .map((vd) => ({ id: vd.id, kind: "vd" as const, title: vd.title, subtitle: vd.roadName || "VD", item: vd }));
 
-    return [...cameraMatches, ...vdMatches].slice(0, 8);
-  }, [catalog?.cameras, catalog?.vehicleDetectors, query, searchPlace]);
+    return cameraMatches;
+  }, [catalog?.cameras, query, searchPlace]);
 
   const showSearchResults =
     Boolean(query.trim()) && (localSearchMatches.length > 0 || placePredictions.length > 0 || placesError || searching);
@@ -797,11 +747,10 @@ export default function App() {
 
     setSearchPlace(place);
     setSelectedCamera(undefined);
-    setSelectedVehicleDetector(undefined);
     setQuery(place.title);
     setPlacePredictions([]);
     setFocusedListFilter(undefined);
-    setVisibleLayers((current) => ({ ...current, cameras: true, vehicleDetectors: true }));
+    setVisibleLayers((current) => ({ ...current, cameras: true }));
     setCameraFilter("nearby");
     setActiveMobileSheet("search");
     setMobileSheetSnap("half");
@@ -826,10 +775,6 @@ export default function App() {
       const firstLocal = localSearchMatches[0];
       if (firstLocal?.kind === "camera") {
         selectCamera(firstLocal.item);
-        return;
-      }
-      if (firstLocal?.kind === "vd") {
-        selectVehicleDetector(firstLocal.item);
         return;
       }
 
@@ -858,18 +803,9 @@ export default function App() {
   useEffect(() => {
     if (selectedCamera && !filteredCameras.some((camera) => camera.id === selectedCamera.id)) {
       setSelectedCamera(undefined);
-      return;
     }
 
-    if (
-      selectedVehicleDetector &&
-      !filteredVehicleDetectors.some((vehicleDetector) => vehicleDetector.id === selectedVehicleDetector.id)
-    ) {
-      setSelectedVehicleDetector(undefined);
-      return;
-    }
-
-  }, [filteredCameras, filteredVehicleDetectors, selectedCamera, selectedVehicleDetector]);
+  }, [filteredCameras, selectedCamera]);
 
   const favoriteCount = favorites.size;
   const selectedIsFavorite = selectedCamera ? favorites.has(selectedCamera.id) : false;
@@ -878,17 +814,13 @@ export default function App() {
   const rainWeather = selectedCamera ? environment : rainEnvironment;
   const rainWeatherError = selectedCamera ? environmentError : rainEnvironmentError;
   const visibleCameras = filteredCameras.slice(0, visibleCount);
-  const vehicleDetectorLimit = visibleLayers.cameras ? Math.min(40, visibleCount) : visibleCount;
-  const visibleVehicleDetectors = filteredVehicleDetectors.slice(0, vehicleDetectorLimit);
-  const shownItemCount = visibleCameras.length + (isFocusedList ? 0 : visibleVehicleDetectors.length);
-  const totalFilteredCount = filteredCameras.length + (isFocusedList ? 0 : filteredVehicleDetectors.length);
-  const canLoadMore =
-    filteredCameras.length > visibleCameras.length ||
-    (!isFocusedList && filteredVehicleDetectors.length > visibleVehicleDetectors.length);
+  const shownItemCount = visibleCameras.length;
+  const totalFilteredCount = filteredCameras.length;
+  const canLoadMore = filteredCameras.length > visibleCameras.length;
   const emptyStateText = getEmptyStateText({
     cameraFilter,
     favoriteCount,
-    hasVisibleLayer: visibleLayers.cameras || visibleLayers.vehicleDetectors
+    hasVisibleLayer: visibleLayers.cameras
   });
   const sourceHealth = summary?.sourceHealth.status ?? "unavailable";
   const sourceIssueText = sourceHealthText(sourceHealth, summary?.sourceHealth.errorCount ?? 0);
@@ -974,7 +906,6 @@ export default function App() {
 
   function openMobileSheet(sheet: Exclude<MobileSheet, "detail">) {
     setSelectedCamera(undefined);
-    setSelectedVehicleDetector(undefined);
     setActiveMobileSheet(sheet);
     setMobileSheetSnap("half");
   }
@@ -1120,7 +1051,7 @@ export default function App() {
               <button
                 className="search-result-item"
                 key={`${match.kind}:${match.id}`}
-                onClick={() => (match.kind === "camera" ? selectCamera(match.item) : selectVehicleDetector(match.item))}
+                onClick={() => selectCamera(match.item)}
                 type="button"
               >
                 <strong>{match.title}</strong>
@@ -1175,14 +1106,10 @@ export default function App() {
     );
   }
 
-  function renderMobilePointList(options: { includeVehicleDetectors?: boolean } = {}) {
-    const includeVehicleDetectors = options.includeVehicleDetectors ?? true;
-    const showVehicleDetectorList = includeVehicleDetectors && !isFocusedList && visibleLayers.vehicleDetectors && visibleVehicleDetectors.length > 0;
-    const mobileShownItemCount = visibleCameras.length + (showVehicleDetectorList ? visibleVehicleDetectors.length : 0);
-    const mobileTotalFilteredCount = filteredCameras.length + (includeVehicleDetectors && !isFocusedList ? filteredVehicleDetectors.length : 0);
-    const mobileCanLoadMore =
-      filteredCameras.length > visibleCameras.length ||
-      (includeVehicleDetectors && !isFocusedList && filteredVehicleDetectors.length > visibleVehicleDetectors.length);
+  function renderMobilePointList() {
+    const mobileShownItemCount = visibleCameras.length;
+    const mobileTotalFilteredCount = filteredCameras.length;
+    const mobileCanLoadMore = filteredCameras.length > visibleCameras.length;
 
     return (
       <>
@@ -1215,37 +1142,6 @@ export default function App() {
               </button>
             );
           })}
-
-          {showVehicleDetectorList && (
-            <section className="vd-list-section" aria-label="交通點位">
-              <div className="section-label">
-                <Activity size={15} />
-                <span>交通點位</span>
-                <strong>{filteredVehicleDetectors.length.toLocaleString()}</strong>
-              </div>
-              {visibleVehicleDetectors.map((vehicleDetector) => {
-                const distanceText = formatListDistance(listDistanceOrigin, vehicleDetector);
-
-                return (
-                  <button
-                    className={vehicleDetector.id === selectedVehicleDetector?.id ? "camera-item traffic active" : "camera-item traffic"}
-                    key={vehicleDetector.id}
-                    onClick={() => selectVehicleDetector(vehicleDetector)}
-                    type="button"
-                  >
-                    <span className="camera-dot traffic" />
-                    <span className="camera-copy">
-                      <strong>{vehicleDetector.title}</strong>
-                      <span className="camera-meta">
-                        <small>{vehicleDetector.roadName || "未命名道路"} · VD</small>
-                        {distanceText && <span className="camera-distance">{distanceText}</span>}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </section>
-          )}
 
           {!loading && !mobileShownItemCount && (
             <div className="empty-state">
@@ -1302,12 +1198,6 @@ export default function App() {
             count={summary?.cameras.total ?? 0}
             label="即時影像"
             onToggle={() => toggleLayer("cameras")}
-          />
-          <LayerToggle
-            checked={visibleLayers.vehicleDetectors}
-            count={summary?.vehicleDetectors.total ?? 0}
-            label="交通偵測"
-            onToggle={() => toggleLayer("vehicleDetectors")}
           />
           <LayerToggle
             checked={visibleLayers.radar}
@@ -1450,7 +1340,7 @@ export default function App() {
           <Star size={18} />
           <span>已收藏 {favoriteCount.toLocaleString("zh-TW")} 個攝影機</span>
         </div>
-        {renderMobilePointList({ includeVehicleDetectors: false })}
+        {renderMobilePointList()}
       </div>
     );
   }
@@ -1471,9 +1361,7 @@ export default function App() {
     <main className={`app-shell theme-${timeTheme}`} data-theme={timeTheme}>
       <CameraMap
         cameras={filteredCameras}
-        vehicleDetectors={isFocusedList ? [] : filteredVehicleDetectors}
         selectedCamera={selectedCamera}
-        selectedVehicleDetector={selectedVehicleDetector}
         radarOverlay={visibleLayers.radar ? radarOverlay : undefined}
         radarOpacity={radarOpacity}
         searchPlace={searchPlace}
@@ -1483,7 +1371,6 @@ export default function App() {
         theme={timeTheme}
         focusCameras={focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
-        onSelectVehicleDetector={selectVehicleDetector}
         onUserMapGesture={pauseLocationFollow}
         onViewportTargetChange={setMapViewportTarget}
       />
@@ -1555,7 +1442,7 @@ export default function App() {
                 <button
                   className="search-result-item"
                   key={`${match.kind}:${match.id}`}
-                  onClick={() => (match.kind === "camera" ? selectCamera(match.item) : selectVehicleDetector(match.item))}
+                  onClick={() => selectCamera(match.item)}
                   type="button"
                 >
                   <strong>{match.title}</strong>
@@ -1584,7 +1471,6 @@ export default function App() {
           cameras={summary?.cameras.total ?? 0}
           sourceHealth={sourceHealth}
           updatedAt={catalog?.updatedAt}
-          vehicleDetectors={summary?.vehicleDetectors.total ?? 0}
         />
 
         <div className="quick-actions">
@@ -1644,12 +1530,6 @@ export default function App() {
               count={summary?.cameras.total ?? 0}
               label="閉路電視攝影機"
               onToggle={() => toggleLayer("cameras")}
-            />
-            <LayerToggle
-              checked={visibleLayers.vehicleDetectors}
-              count={summary?.vehicleDetectors.total ?? 0}
-              label="車輛偵測器"
-              onToggle={() => toggleLayer("vehicleDetectors")}
             />
             <LayerToggle
               checked={visibleLayers.radar}
@@ -1811,37 +1691,6 @@ export default function App() {
             );
           })}
 
-          {!isFocusedList && visibleLayers.vehicleDetectors && visibleVehicleDetectors.length > 0 && (
-            <section className="vd-list-section" aria-label="交通點位">
-              <div className="section-label">
-                <Activity size={15} />
-                <span>交通點位</span>
-                <strong>{filteredVehicleDetectors.length.toLocaleString()}</strong>
-              </div>
-              {visibleVehicleDetectors.map((vehicleDetector) => {
-                const distanceText = formatListDistance(listDistanceOrigin, vehicleDetector);
-
-                return (
-                  <button
-                    className={vehicleDetector.id === selectedVehicleDetector?.id ? "camera-item traffic active" : "camera-item traffic"}
-                    key={vehicleDetector.id}
-                    onClick={() => selectVehicleDetector(vehicleDetector)}
-                    type="button"
-                  >
-                    <span className="camera-dot traffic" />
-                    <span className="camera-copy">
-                      <strong>{vehicleDetector.title}</strong>
-                      <span className="camera-meta">
-                        <small>{vehicleDetector.roadName || "未標示道路"} · VD</small>
-                        {distanceText && <span className="camera-distance">{distanceText}</span>}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </section>
-          )}
-
           {!loading && !shownItemCount && (
             <div className="empty-state">
               <Video size={22} />
@@ -1898,7 +1747,6 @@ export default function App() {
             setActiveMobileSheet("rain");
             setMobileSheetSnap("half");
             setSelectedCamera(undefined);
-            setSelectedVehicleDetector(undefined);
           }}
         >
           <CloudRain size={19} />
@@ -1953,19 +1801,17 @@ export default function App() {
         </MobileContextSheet>
       )}
 
-      {(selectedCamera || selectedVehicleDetector) && (
+      {selectedCamera && (
         <DetailPanel
           camera={selectedCamera}
-          vehicleDetector={selectedVehicleDetector}
-          environment={selectedCamera ? environment : undefined}
-          environmentError={selectedCamera ? environmentError : ""}
-          isFavorite={selectedCamera ? selectedIsFavorite : false}
+          environment={environment}
+          environmentError={environmentError}
+          isFavorite={selectedIsFavorite}
           onClose={() => {
             setSelectedCamera(undefined);
-            setSelectedVehicleDetector(undefined);
             setActiveMobileSheet(undefined);
           }}
-          onToggleFavorite={() => selectedCamera && toggleFavorite(selectedCamera.id)}
+          onToggleFavorite={() => toggleFavorite(selectedCamera.id)}
         />
       )}
 
@@ -2043,23 +1889,17 @@ function MobileContextSheet({
 function SummaryStrip({
   cameras,
   sourceHealth,
-  updatedAt,
-  vehicleDetectors
+  updatedAt
 }: {
   cameras: number;
   sourceHealth: "ok" | "partial" | "unavailable";
   updatedAt?: string;
-  vehicleDetectors: number;
 }) {
   return (
     <div className="summary-strip" aria-label="即時摘要">
       <div>
         <span>CCTV</span>
         <strong>{formatNumber(cameras)}</strong>
-      </div>
-      <div>
-        <span>VD</span>
-        <strong>{formatNumber(vehicleDetectors)}</strong>
       </div>
       <div>
         <span>來源</span>
@@ -2420,10 +2260,6 @@ function MapLegend() {
       <span>
         <i className="legend-dot scenic" />
         風景區
-      </span>
-      <span>
-        <i className="legend-dot traffic" />
-        VD
       </span>
     </div>
   );

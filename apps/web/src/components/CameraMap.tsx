@@ -2,18 +2,17 @@ import { MarkerClusterer, SuperClusterViewportAlgorithm } from "@googlemaps/mark
 import { useEffect, useRef, useState } from "react";
 import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
 import type { TimeTheme } from "../timeTheme";
-import type { Camera, RadarOverlayResponse, SearchPlace, VehicleDetector } from "../types";
+import type { Camera, RadarOverlayResponse, SearchPlace } from "../types";
 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
 const USER_LOCATION_RADIUS_METERS = 500;
 const VIEWPORT_PADDING_RATIO = 0.35;
 
-const markerColors: Record<Camera["category"] | "traffic", string> = {
+const markerColors: Record<Camera["category"], string> = {
   freeway: "#0e6b52",
   highway: "#2b6fb0",
   city: "#b25d17",
-  scenic: "#0f9f9a",
-  traffic: "#8b5cf6"
+  scenic: "#0f9f9a"
 };
 
 const dayMapStyles: google.maps.MapTypeStyle[] = [
@@ -115,9 +114,7 @@ const nightMapStyles: google.maps.MapTypeStyle[] = [
 
 interface CameraMapProps {
   cameras: Camera[];
-  vehicleDetectors?: VehicleDetector[];
   selectedCamera?: Camera;
-  selectedVehicleDetector?: VehicleDetector;
   radarOverlay?: RadarOverlayResponse;
   radarOpacity?: number;
   searchPlace?: SearchPlace;
@@ -127,27 +124,19 @@ interface CameraMapProps {
   theme: TimeTheme;
   focusCameras?: Camera[];
   onSelectCamera: (camera: Camera) => void;
-  onSelectVehicleDetector?: (vd: VehicleDetector) => void;
   onUserMapGesture?: () => void;
   onViewportTargetChange?: (target: { lat: number; lon: number; title: string }) => void;
 }
 
-type MarkerKind = "camera" | "vd";
-
 interface MarkerEntry {
-  kind: MarkerKind;
   marker: google.maps.Marker;
 }
 
-type MarkerData =
-  | { kind: "camera"; item: Camera }
-  | { kind: "vd"; item: VehicleDetector };
+type MarkerData = { item: Camera };
 
 export function CameraMap({
   cameras,
-  vehicleDetectors = [],
   selectedCamera,
-  selectedVehicleDetector,
   radarOverlay,
   radarOpacity = 0.68,
   searchPlace,
@@ -157,7 +146,6 @@ export function CameraMap({
   theme,
   focusCameras,
   onSelectCamera,
-  onSelectVehicleDetector,
   onUserMapGesture,
   onViewportTargetChange
 }: CameraMapProps) {
@@ -170,7 +158,6 @@ export function CameraMap({
   const radarOverlayRef = useRef<google.maps.GroundOverlay | undefined>(undefined);
   const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const onSelectCameraRef = useRef(onSelectCamera);
-  const onSelectVehicleDetectorRef = useRef(onSelectVehicleDetector);
   const onUserMapGestureRef = useRef(onUserMapGesture);
   const onViewportTargetChangeRef = useRef(onViewportTargetChange);
   const lastUserLocationFocusRequestRef = useRef(userLocationFocusRequest);
@@ -180,21 +167,18 @@ export function CameraMap({
   const [loadError, setLoadError] = useState("");
 
   onSelectCameraRef.current = onSelectCamera;
-  onSelectVehicleDetectorRef.current = onSelectVehicleDetector;
   onUserMapGestureRef.current = onUserMapGesture;
   onViewportTargetChangeRef.current = onViewportTargetChange;
 
   function ensureMarker({
     color,
     key,
-    kind,
     item,
     selected,
     title
   }: {
     color: string;
     key: string;
-    kind: MarkerKind;
     item: { lat: number; lon: number };
     selected: boolean;
     title: string;
@@ -220,15 +204,10 @@ export function CameraMap({
       const markerData = markerDataRef.current.get(key);
       if (!markerData) return;
 
-      if (markerData.kind === "camera") {
-        onSelectCameraRef.current(markerData.item);
-        return;
-      }
-
-      onSelectVehicleDetectorRef.current?.(markerData.item);
+      onSelectCameraRef.current(markerData.item);
     });
 
-    const entry = { kind, marker };
+    const entry = { marker };
     markerCacheRef.current.set(key, entry);
     return entry;
   }
@@ -365,7 +344,6 @@ export function CameraMap({
 
     const paddedBounds = padBounds(viewportBounds, VIEWPORT_PADDING_RATIO);
     const selectedCameraKey = selectedCamera ? cameraMarkerKey(selectedCamera.id) : "";
-    const selectedVdKey = selectedVehicleDetector ? vehicleDetectorMarkerKey(selectedVehicleDetector.id) : "";
     const nextKeys = new Set<string>();
     const validKeys = new Set<string>();
     const markersToAdd: google.maps.Marker[] = [];
@@ -374,7 +352,7 @@ export function CameraMap({
     cameras.forEach((camera) => {
       const key = cameraMarkerKey(camera.id);
       validKeys.add(key);
-      markerDataRef.current.set(key, { kind: "camera", item: camera });
+      markerDataRef.current.set(key, { item: camera });
 
       if (!isWithinBounds(camera, paddedBounds) && key !== selectedCameraKey) {
         return;
@@ -383,35 +361,10 @@ export function CameraMap({
       nextKeys.add(key);
       const entry = ensureMarker({
         key,
-        kind: "camera",
         color: markerColors[camera.category],
         item: camera,
         selected: key === selectedCameraKey,
         title: camera.title
-      });
-
-      if (!renderedMarkerKeysRef.current.has(key)) {
-        markersToAdd.push(entry.marker);
-      }
-    });
-
-    vehicleDetectors.forEach((vehicleDetector) => {
-      const key = vehicleDetectorMarkerKey(vehicleDetector.id);
-      validKeys.add(key);
-      markerDataRef.current.set(key, { kind: "vd", item: vehicleDetector });
-
-      if (!isWithinBounds(vehicleDetector, paddedBounds) && key !== selectedVdKey) {
-        return;
-      }
-
-      nextKeys.add(key);
-      const entry = ensureMarker({
-        key,
-        kind: "vd",
-        color: markerColors.traffic,
-        item: vehicleDetector,
-        selected: key === selectedVdKey,
-        title: vehicleDetector.title
       });
 
       if (!renderedMarkerKeysRef.current.has(key)) {
@@ -447,7 +400,7 @@ export function CameraMap({
     if (markersToAdd.length) {
       clustererRef.current.addMarkers(markersToAdd, true);
     }
-    if (markersToRemove.length || markersToAdd.length || selectedCameraKey || selectedVdKey) {
+    if (markersToRemove.length || markersToAdd.length || selectedCameraKey) {
       clustererRef.current.render();
     }
 
@@ -456,8 +409,6 @@ export function CameraMap({
     cameras,
     map,
     selectedCamera?.id,
-    selectedVehicleDetector?.id,
-    vehicleDetectors,
     viewportBounds
   ]);
 
@@ -583,7 +534,7 @@ export function CameraMap({
   useEffect(() => {
     if (!map) return;
 
-    const target = selectedCamera || selectedVehicleDetector;
+    const target = selectedCamera;
     if (target) {
       map.panTo({ lat: target.lat, lng: target.lon });
       map.setZoom(Math.max(map.getZoom() || 12, 14));
@@ -607,7 +558,7 @@ export function CameraMap({
       focusCameras.forEach((camera) => bounds.extend({ lat: camera.lat, lng: camera.lon }));
       map.fitBounds(bounds, 68);
     }
-  }, [focusCameras, map, searchPlace, selectedCamera, selectedVehicleDetector]);
+  }, [focusCameras, map, searchPlace, selectedCamera]);
 
   if (!GOOGLE_MAPS_API_KEY) {
     return (
@@ -660,10 +611,6 @@ function markerIcon(color: string, selected: boolean): google.maps.Symbol {
 
 function cameraMarkerKey(id: string) {
   return `camera:${id}`;
-}
-
-function vehicleDetectorMarkerKey(id: string) {
-  return `vd:${id}`;
 }
 
 function boundsToLiteral(bounds: google.maps.LatLngBounds): google.maps.LatLngBoundsLiteral {

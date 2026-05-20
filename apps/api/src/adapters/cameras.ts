@@ -82,9 +82,8 @@ export async function getCameraCatalog() {
 }
 
 async function loadCameraCatalog(): Promise<CameraCatalog> {
-  const [cameraResult, vdResult, scenicResult] = await Promise.allSettled([
+  const [cameraResult, scenicResult] = await Promise.allSettled([
     loadCameraCatalogData(),
-    loadVehicleDetectorCatalog(),
     loadTourismScenicCatalog()
   ]);
 
@@ -105,17 +104,9 @@ async function loadCameraCatalog(): Promise<CameraCatalog> {
     }
   ];
 
-  const vehicleDetectors = vdResult.status === "fulfilled" ? vdResult.value.vehicleDetectors : [];
-  const vdErrors = vdResult.status === "fulfilled" ? vdResult.value.sourceErrors : [
-    {
-      source: "TDX 運輸資料流通服務",
-      endpoint: "Road Traffic VD",
-      message: vdResult.reason instanceof Error ? vdResult.reason.message : String(vdResult.reason)
-    }
-  ];
-
+  const vehicleDetectors: VehicleDetector[] = [];
   const cameras = [...trafficCameras, ...scenicCameras];
-  const sourceErrors = [...cameraErrors, ...scenicErrors, ...vdErrors];
+  const sourceErrors = [...cameraErrors, ...scenicErrors];
 
   return {
     cameras,
@@ -200,35 +191,6 @@ async function loadCameraCatalogData(): Promise<{ cameras: Camera[]; sourceError
     cameras: deduped,
     sourceErrors
   };
-}
-
-async function loadVehicleDetectorCatalog(): Promise<{ vehicleDetectors: VehicleDetector[]; sourceErrors: SourceError[] }> {
-  try {
-    const payload = await withTdxRetry(() => tdxGet<unknown>("/Road/Traffic/VD/Freeway", {}, { auth: "auto" }));
-    const vdData = payload as { VDs: unknown[] };
-    const rows = vdData.VDs || [];
-    
-    const vehicleDetectors = rows
-      .map((row) => normalizeVehicleDetector(row))
-      .filter((vd): vd is VehicleDetector => Boolean(vd))
-      .sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
-
-    return {
-      vehicleDetectors,
-      sourceErrors: []
-    };
-  } catch (error) {
-    return {
-      vehicleDetectors: [],
-      sourceErrors: [
-        {
-          source: "TDX 運輸資料流通服務",
-          endpoint: "/Road/Traffic/VD/Freeway",
-          message: error instanceof Error ? error.message : String(error)
-        }
-      ]
-    };
-  }
 }
 
 interface ScenicListItem {
@@ -613,56 +575,6 @@ function normalizeCamera(row: unknown, scope: CameraScope): Camera | undefined {
     sourcePageUrl: streamUrl,
     attribution: scope.attribution,
     status: "unknown",
-    updatedAt
-  };
-}
-
-function normalizeVehicleDetector(row: unknown): VehicleDetector | undefined {
-  if (!isRecord(row)) {
-    return undefined;
-  }
-
-  const vdId = firstString(row, ["VDID", "VDId", "ID", "id"]);
-  const lat = firstNumber(row, ["PositionLat", "Latitude", "Lat", "lat"]);
-  const lon = firstNumber(row, ["PositionLon", "Longitude", "Lon", "lng", "lon"]);
-
-  if (!vdId || lat === undefined || lon === undefined || !isTaiwanCoordinate(lat, lon)) {
-    return undefined;
-  }
-
-  const roadName = firstString(row, ["RoadName", "Road", "RouteName"]) || "";
-  const roadSection = row.RoadSection;
-  const biDirectional = typeof row.BiDirectional === "number" ? row.BiDirectional : 0;
-  const detectionLinks = Array.isArray(row.DetectionLinks) ? row.DetectionLinks : [];
-  const updatedAt = firstString(row, ["UpdateTime", "UpdatedTime", "DataCollectTime", "SrcUpdateTime"]) || new Date().toISOString();
-
-  const normalizedDetectionLinks = detectionLinks
-    .filter((link): link is Record<string, unknown> => isRecord(link))
-    .map((link) => ({
-      linkId: firstString(link, ["LinkID", "LinkId", "ID", "id"]) || "",
-      bearing: firstString(link, ["Bearing", "Direction"]) || "",
-      roadDirection: firstString(link, ["RoadDirection", "Direction"]) || "",
-      laneNum: typeof link.LaneNum === "number" ? link.LaneNum : 0,
-      actualLaneNum: typeof link.ActualLaneNum === "number" ? link.ActualLaneNum : 0
-    }));
-
-  const roadSectionNormalized = isRecord(roadSection) ? {
-    start: firstString(roadSection, ["Start"]) || "",
-    end: firstString(roadSection, ["End"]) || ""
-  } : { start: "", end: "" };
-
-  return {
-    id: `vd:${vdId}`,
-    source: "TDX 運輸資料流通服務",
-    vdId,
-    title: `${roadName} ${roadSectionNormalized.start} - ${roadSectionNormalized.end}`.trim() || vdId,
-    roadName,
-    roadSection: roadSectionNormalized,
-    lat,
-    lon,
-    biDirectional,
-    detectionLinks: normalizedDetectionLinks,
-    attribution: "TDX 運輸資料流通服務 / 交通部高速公路局",
     updatedAt
   };
 }

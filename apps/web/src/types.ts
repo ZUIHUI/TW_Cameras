@@ -240,5 +240,4 @@ export type CameraFilter = "all" | "nearby" | CameraCategory | "favorites";
 export interface VisibleLayers {
   cameras: boolean;
   radar: boolean;
-  vehicleDetectors: boolean;
 }
