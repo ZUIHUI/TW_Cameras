@@ -53,6 +53,7 @@ type ControlPanelSnap = "hidden" | "half" | "full";
 type MobileSheet = "search" | "layers" | "rain" | "nearby" | "favorites" | "detail";
 type ObservationTarget = { lat: number; lon: number; title: string };
 const LOCATION_FOLLOW_THRESHOLD_METERS = 25;
+const MOBILE_BREAKPOINT_QUERY = "(max-width: 980px)";
 
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
@@ -108,6 +109,7 @@ export default function App() {
   const [activeMobileSheet, setActiveMobileSheet] = useState<MobileSheet | undefined>();
   const [mobileSheetSnap, setMobileSheetSnap] = useState<ControlPanelSnap>("half");
   const [mobileSheetDragOffset, setMobileSheetDragOffset] = useState(0);
+  const [isMobileViewport, setIsMobileViewport] = useState(getIsMobileViewport);
   const [mapViewportTarget, setMapViewportTarget] = useState<ObservationTarget | undefined>();
   const [mapDataTarget, setMapDataTarget] = useState<ObservationTarget | undefined>();
   const [autoTimeTheme, setAutoTimeTheme] = useState<TimeTheme>(() => getCurrentTimeTheme());
@@ -131,6 +133,9 @@ export default function App() {
   const nearbyTourismTarget = useMemo<ObservationTarget | undefined>(() => {
     return mapDataTarget;
   }, [mapDataTarget]);
+  const shouldLoadRecommendations = Boolean(
+    nearbyTourismTarget && (isMobileViewport ? activeMobileSheet === "nearby" : cameraFilter === "nearby")
+  );
 
   const rainObservationTarget = useMemo<ObservationTarget | undefined>(() => {
     if (selectedCamera) {
@@ -171,6 +176,15 @@ export default function App() {
     return () => {
       window.clearInterval(timer);
     };
+  }, []);
+
+  useEffect(() => {
+    const query = window.matchMedia(MOBILE_BREAKPOINT_QUERY);
+    const syncViewport = () => setIsMobileViewport(query.matches);
+
+    syncViewport();
+    query.addEventListener("change", syncViewport);
+    return () => query.removeEventListener("change", syncViewport);
   }, []);
 
   useEffect(() => {
@@ -269,7 +283,7 @@ export default function App() {
     setNearbyTourism(undefined);
     setNearbyTourismError("");
 
-    if (!nearbyTourismTarget) {
+    if (!shouldLoadRecommendations || !nearbyTourismTarget) {
       setNearbyTourismLoading(false);
       return;
     }
@@ -290,7 +304,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [manualRefreshKey, nearbyTourismTarget]);
+  }, [manualRefreshKey, nearbyTourismTarget, shouldLoadRecommendations]);
 
   useEffect(() => {
     setRadarOverlayError("");
@@ -380,7 +394,7 @@ export default function App() {
     setGoogleRestaurants([]);
     setGoogleRestaurantsError("");
 
-    if (!nearbyTourismTarget || !GOOGLE_MAPS_API_KEY) {
+    if (!shouldLoadRecommendations || !nearbyTourismTarget || !GOOGLE_MAPS_API_KEY) {
       setGoogleRestaurantsLoading(false);
       return;
     }
@@ -401,7 +415,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [manualRefreshKey, nearbyTourismTarget]);
+  }, [manualRefreshKey, nearbyTourismTarget, shouldLoadRecommendations]);
 
   useEffect(() => {
     setVisibleCount(80);
@@ -2203,7 +2217,7 @@ function MapHud({
   const className = ["map-hud", expanded ? "expanded" : "", target ? "" : "no-weather"].filter(Boolean).join(" ");
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 980px)");
+    const query = window.matchMedia(MOBILE_BREAKPOINT_QUERY);
     const syncInteractive = () => setInteractive(query.matches);
 
     syncInteractive();
@@ -2507,6 +2521,10 @@ function saveTimeThemePreference(theme: TimeTheme) {
 
 function isTimeTheme(value: unknown): value is TimeTheme {
   return value === "day" || value === "night";
+}
+
+function getIsMobileViewport() {
+  return typeof window !== "undefined" ? window.matchMedia(MOBILE_BREAKPOINT_QUERY).matches : false;
 }
 
 function roundedObservationTarget(target: ObservationTarget): ObservationTarget {
