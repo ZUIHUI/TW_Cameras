@@ -4,7 +4,7 @@ Windows-first web prototype for a Taiwan live camera app.
 
 ## Stack
 
-- Web: Vite + React + TypeScript + OpenStreetMap tiles
+- Web: Vite + React + TypeScript + Google Maps JavaScript API
 - Local API: Fastify
 - Vercel API: root `/api` Vercel Functions
 - Package manager: pnpm
@@ -23,6 +23,7 @@ GOOGLE_GEOCODING_API_KEY=your-server-side-google-geocoding-api-key
 GOOGLE_MAPS_API_KEY=your-server-side-google-places-api-key
 API_PORT=8787
 VITE_API_BASE_URL=/api
+VITE_GOOGLE_MAPS_API_KEY=your-restricted-browser-google-maps-api-key
 ```
 
 Install and run:
@@ -77,11 +78,14 @@ TDX_CLIENT_SECRET
 TDX_CITY_CODES
 GOOGLE_GEOCODING_API_KEY
 GOOGLE_MAPS_API_KEY
+VITE_GOOGLE_MAPS_API_KEY
 ```
 
 `TDX_CLIENT_ID` and `TDX_CLIENT_SECRET` can stay empty while waiting for TDX approval. The API will try TDX public reads for CCTV/VD metadata; when credentials are present, it uses the OAuth token first and falls back to public reads if the token is rate-limited.
 
 `TDX_CITY_CODES` defaults to `all` so the city CCTV catalog covers Taiwan. Set a comma-separated list like `Taipei,NewTaipei,Taichung` only when you want to limit TDX requests during development.
+
+`VITE_GOOGLE_MAPS_API_KEY` is the browser key for the interactive Google map. Google Maps JavaScript API keys are visible to the browser by design, so this key must be restricted in Google Cloud Console with HTTP referrers for your Vercel domain and localhost, and API restrictions for Maps JavaScript API only.
 
 `GOOGLE_MAPS_API_KEY` is server-side only. It powers the internal `/api/google-places` proxy for Google Places autocomplete, place details, and restaurant recommendations, so it must not use the `VITE_` prefix. Restrict it in Google Cloud Console to Places API / Places API (New) usage.
 
@@ -89,7 +93,7 @@ GOOGLE_MAPS_API_KEY
 
 ## Radar Overlay
 
-The map can show the latest CWA radar echo as an OpenStreetMap overlay. `GET /api/radar` reads the CWA OpenData file API dataset `O-A0058-006`, normalizes the transparent radar image URL and geographic bounds, and caches the metadata briefly.
+The map can show the latest CWA radar echo as a Google Maps overlay. `GET /api/radar` reads the CWA OpenData file API dataset `O-A0058-006`, normalizes the transparent radar image URL and geographic bounds, and caches the metadata briefly.
 
 The radar layer uses the existing server-side `CWA_API_KEY`. It is optional in the UI; if the key or upstream data is unavailable, camera and nearby tourism features continue to work.
 

@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     root: path.join(workspaceRoot, "apps/web"),
+    envDir: workspaceRoot,
     plugins: [react()],
     build: {
       outDir: path.join(workspaceRoot, "dist"),
