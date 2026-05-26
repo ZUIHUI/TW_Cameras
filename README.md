@@ -87,7 +87,7 @@ VITE_GOOGLE_MAPS_API_KEY
 
 `VITE_GOOGLE_MAPS_API_KEY` is the browser key for the interactive Google map. Google Maps JavaScript API keys are visible to the browser by design, so this key must be restricted in Google Cloud Console with HTTP referrers for your Vercel domain and localhost, and API restrictions for Maps JavaScript API only.
 
-`GOOGLE_MAPS_API_KEY` is server-side only. It powers the internal `/api/google-places` proxy for Google Places autocomplete, place details, and restaurant recommendations, so it must not use the `VITE_` prefix. Restrict it in Google Cloud Console to Places API / Places API (New) usage.
+`GOOGLE_MAPS_API_KEY` is server-side only. It powers the internal `/api/google-places` proxy for Google Places autocomplete, place details, and restaurant recommendations, so it must not use the `VITE_` prefix and must not be restricted by HTTP referrer. Restrict it in Google Cloud Console to Places API / Places API (New) usage. If you add an application restriction for server-side use, use an allowed server/network restriction that matches the deployed runtime; a browser referrer restriction will fail from Vercel Functions.
 
 `GOOGLE_GEOCODING_API_KEY` is server-side only. It is used to add coordinates to scenic live cameras when the tourism source page does not expose coordinates. Restrict it to Geocoding API usage in Google Cloud.
 

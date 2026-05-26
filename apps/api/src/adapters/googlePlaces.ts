@@ -304,7 +304,7 @@ function googlePlacesHeaders(fieldMask: string) {
 }
 
 function googlePlacesApiKey() {
-  const key = config.googleMapsApiKey || config.googleGeocodingApiKey;
+  const key = config.googleMapsApiKey;
   if (!key) {
     throw new UpstreamError("GOOGLE_MAPS_API_KEY is not configured.", 503);
   }
