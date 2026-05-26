@@ -1,9 +1,12 @@
 import type {
   CameraCatalogResponse,
   EnvironmentSummary,
+  GoogleRestaurantItem,
   NearbyTourismResponse,
+  PlacePrediction,
   RadarOverlayResponse,
-  RainfallResponse
+  RainfallResponse,
+  SearchPlace
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -104,4 +107,34 @@ export function getNearbyTourism(lat: number, lon: number, radius = 3000): Promi
     radius: String(radius)
   });
   return fetchJson<NearbyTourismResponse>(`/nearby-tourism?${searchParams.toString()}`);
+}
+
+export function getGoogleNearbyRestaurants(
+  lat: number,
+  lon: number,
+  radius = 3000
+): Promise<GoogleRestaurantItem[]> {
+  const searchParams = new URLSearchParams({
+    kind: "nearby-restaurants",
+    lat: String(lat),
+    lon: String(lon),
+    radius: String(radius)
+  });
+  return fetchJson<GoogleRestaurantItem[]>(`/google-places?${searchParams.toString()}`);
+}
+
+export function getPlacePredictions(input: string): Promise<PlacePrediction[]> {
+  const searchParams = new URLSearchParams({
+    kind: "autocomplete",
+    input
+  });
+  return fetchJson<PlacePrediction[]>(`/google-places?${searchParams.toString()}`);
+}
+
+export function getPlaceDetails(placeId: string): Promise<SearchPlace> {
+  const searchParams = new URLSearchParams({
+    kind: "details",
+    placeId
+  });
+  return fetchJson<SearchPlace>(`/google-places?${searchParams.toString()}`);
 }

@@ -235,6 +235,13 @@ export interface SearchPlace {
   lon: number;
 }
 
+export interface PlacePrediction {
+  placeId: string;
+  description: string;
+  mainText: string;
+  secondaryText: string;
+}
+
 export type CameraFilter = "all" | "nearby" | CameraCategory | "favorites";
 
 export interface VisibleLayers {

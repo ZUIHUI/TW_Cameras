@@ -1,116 +1,21 @@
-import { MarkerClusterer, SuperClusterViewportAlgorithm } from "@googlemaps/markerclusterer";
-import { useEffect, useRef, useState } from "react";
-import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
+import {
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import type { TimeTheme } from "../timeTheme";
 import type { Camera, RadarOverlayResponse, SearchPlace } from "../types";
 
-const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
+const TILE_SIZE = 256;
+const MIN_ZOOM = 6;
+const MAX_ZOOM = 18;
+const TAIWAN_CENTER = { lat: 23.75, lon: 121 };
 const USER_LOCATION_RADIUS_METERS = 500;
-const VIEWPORT_PADDING_RATIO = 0.35;
-
-const markerColors: Record<Camera["category"], string> = {
-  freeway: "#0e6b52",
-  highway: "#2b6fb0",
-  city: "#b25d17",
-  scenic: "#0f9f9a"
-};
-
-const dayMapStyles: google.maps.MapTypeStyle[] = [
-  {
-    featureType: "poi.business",
-    stylers: [{ visibility: "off" }]
-  },
-  {
-    featureType: "transit",
-    stylers: [{ visibility: "off" }]
-  },
-  {
-    featureType: "water",
-    stylers: [{ color: "#cfe8f3" }]
-  }
-];
-
-const nightMapStyles: google.maps.MapTypeStyle[] = [
-  {
-    elementType: "geometry",
-    stylers: [{ color: "#1f2937" }]
-  },
-  {
-    elementType: "labels.icon",
-    stylers: [{ visibility: "off" }]
-  },
-  {
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#d1d5db" }]
-  },
-  {
-    elementType: "labels.text.stroke",
-    stylers: [{ color: "#111827" }]
-  },
-  {
-    featureType: "administrative",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#4b5563" }]
-  },
-  {
-    featureType: "landscape",
-    elementType: "geometry",
-    stylers: [{ color: "#18212f" }]
-  },
-  {
-    featureType: "poi",
-    elementType: "geometry",
-    stylers: [{ color: "#243044" }]
-  },
-  {
-    featureType: "poi",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#9ca3af" }]
-  },
-  {
-    featureType: "poi.business",
-    stylers: [{ visibility: "off" }]
-  },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: "#374151" }]
-  },
-  {
-    featureType: "road",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#111827" }]
-  },
-  {
-    featureType: "road",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#e5e7eb" }]
-  },
-  {
-    featureType: "road.highway",
-    elementType: "geometry",
-    stylers: [{ color: "#475569" }]
-  },
-  {
-    featureType: "road.highway",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#0f172a" }]
-  },
-  {
-    featureType: "transit",
-    stylers: [{ visibility: "off" }]
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#0f2537" }]
-  },
-  {
-    featureType: "water",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#93c5fd" }]
-  }
-];
+const VIEWPORT_PADDING_PX = 96;
 
 interface CameraMapProps {
   cameras: Camera[];
@@ -128,11 +33,65 @@ interface CameraMapProps {
   onViewportTargetChange?: (target: { lat: number; lon: number; title: string }) => void;
 }
 
-interface MarkerEntry {
-  marker: google.maps.Marker;
+interface ViewState {
+  center: {
+    lat: number;
+    lon: number;
+  };
+  zoom: number;
 }
 
-type MarkerData = { item: Camera };
+interface Size {
+  width: number;
+  height: number;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface ViewProjection {
+  centerPoint: Point;
+  topLeft: Point;
+  size: Size;
+  view: ViewState;
+}
+
+interface Tile {
+  key: string;
+  src: string;
+  left: number;
+  top: number;
+}
+
+interface DragState {
+  moved: boolean;
+  pointerId: number;
+  startCenterPoint: Point;
+  startX: number;
+  startY: number;
+  zoom: number;
+}
+
+interface ProjectedCamera {
+  camera: Camera;
+  kind: "camera";
+  left: number;
+  selected: boolean;
+  top: number;
+}
+
+interface ProjectedCluster {
+  cameras: Camera[];
+  count: number;
+  id: string;
+  kind: "cluster";
+  left: number;
+  top: number;
+}
+
+type ProjectedMapItem = ProjectedCamera | ProjectedCluster;
 
 export function CameraMap({
   cameras,
@@ -143,507 +102,583 @@ export function CameraMap({
   userLocation,
   userLocationFocusRequest,
   followUserLocation = false,
-  theme,
   focusCameras,
   onSelectCamera,
   onUserMapGesture,
   onViewportTargetChange
 }: CameraMapProps) {
   const mapElementRef = useRef<HTMLDivElement>(null);
-  const clustererRef = useRef<MarkerClusterer | undefined>(undefined);
-  const markerCacheRef = useRef<Map<string, MarkerEntry>>(new Map());
-  const markerDataRef = useRef<Map<string, MarkerData>>(new Map());
-  const renderedMarkerKeysRef = useRef<Set<string>>(new Set());
-  const circleRef = useRef<google.maps.Circle | undefined>(undefined);
-  const radarOverlayRef = useRef<google.maps.GroundOverlay | undefined>(undefined);
-  const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
-  const onSelectCameraRef = useRef(onSelectCamera);
+  const dragRef = useRef<DragState | undefined>(undefined);
   const onUserMapGestureRef = useRef(onUserMapGesture);
   const onViewportTargetChangeRef = useRef(onViewportTargetChange);
   const lastUserLocationFocusRequestRef = useRef(userLocationFocusRequest);
   const lastFollowPanKeyRef = useRef("");
-  const [map, setMap] = useState<google.maps.Map | undefined>();
-  const [viewportBounds, setViewportBounds] = useState<google.maps.LatLngBoundsLiteral | undefined>();
-  const [loadError, setLoadError] = useState("");
+  const [size, setSize] = useState<Size>({ width: 0, height: 0 });
+  const [view, setView] = useState<ViewState>({
+    center: TAIWAN_CENTER,
+    zoom: 7
+  });
 
-  onSelectCameraRef.current = onSelectCamera;
   onUserMapGestureRef.current = onUserMapGesture;
   onViewportTargetChangeRef.current = onViewportTargetChange;
 
-  function ensureMarker({
-    color,
-    key,
-    item,
-    selected,
-    title
-  }: {
-    color: string;
-    key: string;
-    item: { lat: number; lon: number };
-    selected: boolean;
-    title: string;
-  }): MarkerEntry {
-    const cached = markerCacheRef.current.get(key);
-    if (cached) {
-      cached.marker.setIcon(markerIcon(color, selected));
-      cached.marker.setPosition({ lat: item.lat, lng: item.lon });
-      cached.marker.setTitle(title);
-      cached.marker.setZIndex(selected ? google.maps.Marker.MAX_ZINDEX + 1 : undefined);
-      return cached;
-    }
-
-    const marker = new google.maps.Marker({
-      icon: markerIcon(color, selected),
-      optimized: true,
-      position: { lat: item.lat, lng: item.lon },
-      title,
-      zIndex: selected ? google.maps.Marker.MAX_ZINDEX + 1 : undefined
-    });
-
-    marker.addListener("click", () => {
-      const markerData = markerDataRef.current.get(key);
-      if (!markerData) return;
-
-      onSelectCameraRef.current(markerData.item);
-    });
-
-    const entry = { marker };
-    markerCacheRef.current.set(key, entry);
-    return entry;
-  }
-
   useEffect(() => {
-    if (!GOOGLE_MAPS_API_KEY) {
-      return;
-    }
+    const element = mapElementRef.current;
+    if (!element) return;
 
-    let cancelled = false;
-    loadGoogleMaps()
-      .then(({ Map }) => {
-        if (cancelled || !mapElementRef.current) return;
-
-        const nextMap = new Map(mapElementRef.current, {
-          backgroundColor: mapBackgroundColor(theme),
-          center: TAIWAN_CENTER,
-          clickableIcons: false,
-          fullscreenControl: false,
-          gestureHandling: "greedy",
-          mapTypeControl: false,
-          maxZoom: 18,
-          minZoom: 6,
-          streetViewControl: false,
-          styles: mapStylesForTheme(theme),
-          zoom: 7
-        });
-
-        setMap(nextMap);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setLoadError(error instanceof Error ? error.message : String(error));
-        }
+    const syncSize = () => {
+      setSize({
+        width: element.clientWidth,
+        height: element.clientHeight
       });
-
-    return () => {
-      cancelled = true;
-      setMap(undefined);
     };
+
+    syncSize();
+    const observer = new ResizeObserver(syncSize);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (!map) return;
-
-    map.setOptions({
-      backgroundColor: mapBackgroundColor(theme),
-      styles: mapStylesForTheme(theme)
-    });
-  }, [map, theme]);
-
-  useEffect(() => {
-    if (!map) return;
-
-    clustererRef.current = new MarkerClusterer({
-      map,
-      markers: [],
-      algorithm: new SuperClusterViewportAlgorithm({
-        maxZoom: 17,
-        radius: 84,
-        viewportPadding: 120
-      }),
-      renderer: {
-        render: ({ count, position }) =>
-          new google.maps.Marker({
-            icon: {
-              fillColor: "#183c35",
-              fillOpacity: 0.92,
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: Math.min(24, 12 + String(count).length * 3),
-              strokeColor: "#ffffff",
-              strokeWeight: 2
-            },
-            label: {
-              color: "#ffffff",
-              fontSize: "12px",
-              fontWeight: "700",
-              text: String(count)
-            },
-            position,
-            zIndex: google.maps.Marker.MAX_ZINDEX + count
-          })
-      }
-    });
-
-    return () => {
-      clustererRef.current?.clearMarkers();
-      markerCacheRef.current.forEach(({ marker }) => marker.setMap(null));
-      markerCacheRef.current.clear();
-      markerDataRef.current.clear();
-      renderedMarkerKeysRef.current.clear();
-      clustererRef.current = undefined;
-    };
-  }, [map]);
-
-  useEffect(() => {
-    if (!map) return;
-
-    const syncViewportBounds = () => {
-      const nextBounds = map.getBounds();
-      const nextCenter = map.getCenter();
-      if (!nextBounds || !nextCenter) return;
-
-      setViewportBounds(boundsToLiteral(nextBounds));
-      onViewportTargetChangeRef.current?.({
-        lat: nextCenter.lat(),
-        lon: nextCenter.lng(),
-        title: "目前地圖位置"
-      });
-    };
-
-    const listener = map.addListener("idle", syncViewportBounds);
-    syncViewportBounds();
-
-    return () => {
-      listener.remove();
-    };
-  }, [map]);
-
-  useEffect(() => {
-    if (!map) return;
-
-    const listener = map.addListener("dragstart", () => {
-      onUserMapGestureRef.current?.();
-    });
-
-    return () => {
-      listener.remove();
-    };
-  }, [map]);
-
-  useEffect(() => {
-    if (!map || !clustererRef.current || !viewportBounds) return;
-
-    const paddedBounds = padBounds(viewportBounds, VIEWPORT_PADDING_RATIO);
-    const selectedCameraKey = selectedCamera ? cameraMarkerKey(selectedCamera.id) : "";
-    const nextKeys = new Set<string>();
-    const validKeys = new Set<string>();
-    const markersToAdd: google.maps.Marker[] = [];
-    const markersToRemove: google.maps.Marker[] = [];
-
-    cameras.forEach((camera) => {
-      const key = cameraMarkerKey(camera.id);
-      validKeys.add(key);
-      markerDataRef.current.set(key, { item: camera });
-
-      if (!isWithinBounds(camera, paddedBounds) && key !== selectedCameraKey) {
-        return;
-      }
-
-      nextKeys.add(key);
-      const entry = ensureMarker({
-        key,
-        color: markerColors[camera.category],
-        item: camera,
-        selected: key === selectedCameraKey,
-        title: camera.title
-      });
-
-      if (!renderedMarkerKeysRef.current.has(key)) {
-        markersToAdd.push(entry.marker);
-      }
-    });
-
-    markerCacheRef.current.forEach((entry, key) => {
-      if (!validKeys.has(key)) {
-        if (renderedMarkerKeysRef.current.has(key)) {
-          markersToRemove.push(entry.marker);
-        }
-        entry.marker.setMap(null);
-        markerCacheRef.current.delete(key);
-        markerDataRef.current.delete(key);
-        renderedMarkerKeysRef.current.delete(key);
-      }
-    });
-
-    renderedMarkerKeysRef.current.forEach((key) => {
-      if (!nextKeys.has(key)) {
-        const entry = markerCacheRef.current.get(key);
-        if (entry) {
-          markersToRemove.push(entry.marker);
-          entry.marker.setMap(null);
-        }
-      }
-    });
-
-    if (markersToRemove.length) {
-      clustererRef.current.removeMarkers(markersToRemove, true);
-    }
-    if (markersToAdd.length) {
-      clustererRef.current.addMarkers(markersToAdd, true);
-    }
-    if (markersToRemove.length || markersToAdd.length || selectedCameraKey) {
-      clustererRef.current.render();
-    }
-
-    renderedMarkerKeysRef.current = nextKeys;
-  }, [
-    cameras,
-    map,
-    selectedCamera?.id,
-    viewportBounds
-  ]);
-
-  useEffect(() => {
-    if (!map) return;
-
-    radarOverlayRef.current?.setMap(null);
-    radarOverlayRef.current = undefined;
-    if (!radarOverlay) {
-      return;
-    }
-
-    radarOverlayRef.current = new google.maps.GroundOverlay(
-      radarOverlay.imageUrl,
-      {
-        east: radarOverlay.bounds.east,
-        north: radarOverlay.bounds.north,
-        south: radarOverlay.bounds.south,
-        west: radarOverlay.bounds.west
+  const projection = useMemo<ViewProjection | undefined>(() => {
+    if (!size.width || !size.height) return undefined;
+    const centerPoint = project(view.center, view.zoom);
+    return {
+      centerPoint,
+      size,
+      topLeft: {
+        x: centerPoint.x - size.width / 2,
+        y: centerPoint.y - size.height / 2
       },
-      {
-        clickable: false,
-        opacity: radarOpacity
-      }
-    );
-    radarOverlayRef.current.setMap(map);
-
-    return () => {
-      radarOverlayRef.current?.setMap(null);
-      radarOverlayRef.current = undefined;
+      view
     };
-  }, [map, radarOpacity, radarOverlay?.bounds.east, radarOverlay?.bounds.north, radarOverlay?.bounds.south, radarOverlay?.bounds.west, radarOverlay?.imageUrl]);
+  }, [size, view]);
+
+  const tiles = useMemo(() => (projection ? tilesForProjection(projection) : []), [projection]);
+  const mapItems = useMemo(
+    () => (projection ? projectCameras(cameras, projection, selectedCamera?.id) : []),
+    [cameras, projection, selectedCamera?.id]
+  );
+  const radarBox = useMemo(
+    () => (projection && radarOverlay ? projectedGeoBounds(radarOverlay.bounds, projection) : undefined),
+    [
+      projection,
+      radarOverlay?.bounds.east,
+      radarOverlay?.bounds.north,
+      radarOverlay?.bounds.south,
+      radarOverlay?.bounds.west
+    ]
+  );
+  const userMarker = projection && userLocation ? projectedLocation(userLocation, projection) : undefined;
+  const searchMarker = projection && searchPlace ? projectedLocation(searchPlace, projection) : undefined;
+  const userRadiusPixels =
+    userLocation && projection ? USER_LOCATION_RADIUS_METERS / metersPerPixel(userLocation.lat, projection.view.zoom) : 0;
+  const focusCameraKey = focusCameras?.map((camera) => camera.id).join("|") || "";
 
   useEffect(() => {
-    if (!map) return;
+    if (!projection) return;
 
-    circleRef.current?.setMap(null);
-    if (!userLocation) {
-      return;
-    }
-
-    circleRef.current = new google.maps.Circle({
-      center: toLatLng(userLocation),
-      fillColor: "#60a5fa",
-      fillOpacity: 0.14,
-      map,
-      radius: USER_LOCATION_RADIUS_METERS,
-      strokeColor: "#2563eb",
-      strokeOpacity: 0.9,
-      strokeWeight: 2
+    onViewportTargetChangeRef.current?.({
+      lat: view.center.lat,
+      lon: view.center.lon,
+      title: "地圖中心"
     });
-
-    return () => {
-      circleRef.current?.setMap(null);
-    };
-  }, [map, userLocation]);
+  }, [projection, view.center.lat, view.center.lon]);
 
   useEffect(() => {
-    if (!map) return;
+    if (!size.width || !size.height) return;
 
-    searchMarkerRef.current?.setMap(null);
-    if (!searchPlace) {
-      return;
-    }
-
-    searchMarkerRef.current = new google.maps.Marker({
-      icon: {
-        fillColor: "#dc2626",
-        fillOpacity: 1,
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 9,
-        strokeColor: "#ffffff",
-        strokeWeight: 3
-      },
-      label: {
-        color: "#ffffff",
-        fontSize: "11px",
-        fontWeight: "800",
-        text: "P"
-      },
-      map,
-      position: { lat: searchPlace.lat, lng: searchPlace.lon },
-      title: searchPlace.title,
-      zIndex: google.maps.Marker.MAX_ZINDEX + 10
-    });
-
-    return () => {
-      searchMarkerRef.current?.setMap(null);
-    };
-  }, [map, searchPlace]);
-
-  useEffect(() => {
-    if (!map) return;
-
-    if (!userLocation) {
-      return;
-    }
-
-    if (lastUserLocationFocusRequestRef.current === userLocationFocusRequest) {
-      return;
-    }
-    lastUserLocationFocusRequestRef.current = userLocationFocusRequest;
-
-    const center = toLatLng(userLocation);
-    const bounds = circleBounds(center, USER_LOCATION_RADIUS_METERS);
-    map.fitBounds(bounds, 24);
-  }, [map, userLocation?.lat, userLocation?.lon, userLocationFocusRequest]);
-
-  useEffect(() => {
-    if (!map || !followUserLocation || !userLocation) return;
-
-    const center = toLatLng(userLocation);
-    const locationKey = `${center.lat.toFixed(6)}:${center.lng.toFixed(6)}`;
-    if (lastFollowPanKeyRef.current === locationKey) {
-      return;
-    }
-
-    lastFollowPanKeyRef.current = locationKey;
-    map.panTo(center);
-    map.setZoom(Math.max(map.getZoom() || 15, 15));
-  }, [followUserLocation, map, userLocation?.lat, userLocation?.lon]);
-
-  useEffect(() => {
-    if (!map) return;
-
-    const target = selectedCamera;
-    if (target) {
-      map.panTo({ lat: target.lat, lng: target.lon });
-      map.setZoom(Math.max(map.getZoom() || 12, 14));
+    if (selectedCamera) {
+      centerViewOn(selectedCamera, (current) => Math.max(current.zoom, 14));
       return;
     }
 
     if (searchPlace) {
-      map.panTo({ lat: searchPlace.lat, lng: searchPlace.lon });
-      map.setZoom(Math.max(map.getZoom() || 12, 15));
+      centerViewOn(searchPlace, (current) => Math.max(current.zoom, 15));
       return;
     }
 
     if (focusCameras?.length) {
-      if (focusCameras.length === 1) {
-        map.panTo({ lat: focusCameras[0].lat, lng: focusCameras[0].lon });
-        map.setZoom(Math.max(map.getZoom() || 12, 14));
-        return;
-      }
-
-      const bounds = new google.maps.LatLngBounds();
-      focusCameras.forEach((camera) => bounds.extend({ lat: camera.lat, lng: camera.lon }));
-      map.fitBounds(bounds, 68);
+      setView((current) => fitLocations(focusCameras, size, current.zoom));
     }
-  }, [focusCameras, map, searchPlace, selectedCamera]);
+  }, [focusCameraKey, searchPlace?.id, selectedCamera?.id, size.height, size.width]);
 
-  if (!GOOGLE_MAPS_API_KEY) {
-    return (
-      <div className="map-canvas map-empty-state">
-        <strong>尚未設定 Google Maps API key</strong>
-        <span>請在 .env.local 和 Vercel Environment Variables 設定 VITE_GOOGLE_MAPS_API_KEY。</span>
-      </div>
+  useEffect(() => {
+    if (!userLocation) return;
+    if (lastUserLocationFocusRequestRef.current === userLocationFocusRequest) return;
+
+    lastUserLocationFocusRequestRef.current = userLocationFocusRequest;
+    centerViewOn(userLocation, (current) => Math.max(current.zoom, 15));
+  }, [userLocation?.lat, userLocation?.lon, userLocationFocusRequest]);
+
+  useEffect(() => {
+    if (!followUserLocation || !userLocation) return;
+
+    const locationKey = `${userLocation.lat.toFixed(6)}:${userLocation.lon.toFixed(6)}`;
+    if (lastFollowPanKeyRef.current === locationKey) return;
+
+    lastFollowPanKeyRef.current = locationKey;
+    centerViewOn(userLocation, (current) => Math.max(current.zoom, 15));
+  }, [followUserLocation, userLocation?.lat, userLocation?.lon]);
+
+  function centerViewOn(target: { lat: number; lon: number }, zoom: number | ((current: ViewState) => number)) {
+    setView((current) =>
+      normalizeView({
+        center: { lat: target.lat, lon: target.lon },
+        zoom: typeof zoom === "function" ? zoom(current) : zoom
+      })
     );
   }
 
-  if (loadError) {
-    return (
-      <div className="map-canvas map-empty-state">
-        <strong>Google Maps 暫時無法載入</strong>
-        <span>{loadError}</span>
-      </div>
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!projection || event.button !== 0) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      moved: false,
+      pointerId: event.pointerId,
+      startCenterPoint: projection.centerPoint,
+      startX: event.clientX,
+      startY: event.clientY,
+      zoom: view.zoom
+    };
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) > 3) {
+      drag.moved = true;
+      onUserMapGestureRef.current?.();
+    }
+
+    setView((current) => {
+      if (current.zoom !== drag.zoom) return current;
+      return normalizeView({
+        center: unproject(
+          {
+            x: drag.startCenterPoint.x - dx,
+            y: drag.startCenterPoint.y - dy
+          },
+          drag.zoom
+        ),
+        zoom: drag.zoom
+      });
+    });
+  }
+
+  function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = undefined;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may already be released after cancelled gestures.
+      }
+    }
+  }
+
+  function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    if (!projection || !mapElementRef.current) return;
+
+    event.preventDefault();
+    onUserMapGestureRef.current?.();
+
+    const delta = event.deltaY < 0 ? 1 : -1;
+    const nextZoom = clamp(view.zoom + delta, MIN_ZOOM, MAX_ZOOM);
+    if (nextZoom === view.zoom) return;
+
+    const rect = mapElementRef.current.getBoundingClientRect();
+    zoomAtPoint(nextZoom, {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    });
+  }
+
+  function zoomBy(delta: number) {
+    if (!projection) return;
+    onUserMapGestureRef.current?.();
+    zoomAtPoint(clamp(view.zoom + delta, MIN_ZOOM, MAX_ZOOM), {
+      x: size.width / 2,
+      y: size.height / 2
+    });
+  }
+
+  function zoomAtPoint(nextZoom: number, screenPoint: Point) {
+    if (!projection || nextZoom === view.zoom) return;
+
+    const geoUnderPointer = unproject(
+      {
+        x: projection.topLeft.x + screenPoint.x,
+        y: projection.topLeft.y + screenPoint.y
+      },
+      view.zoom
+    );
+    const nextPointerWorld = project(geoUnderPointer, nextZoom);
+    const nextCenterPoint = {
+      x: nextPointerWorld.x - (screenPoint.x - size.width / 2),
+      y: nextPointerWorld.y - (screenPoint.y - size.height / 2)
+    };
+
+    setView(
+      normalizeView({
+        center: unproject(nextCenterPoint, nextZoom),
+        zoom: nextZoom
+      })
     );
   }
 
-  return <div ref={mapElementRef} className="map-canvas" aria-label="Google Maps 即時影像地圖" />;
+  function zoomToCluster(cluster: ProjectedCluster) {
+    const center = averageLocation(cluster.cameras);
+    onUserMapGestureRef.current?.();
+    centerViewOn(center, (current) => Math.min(MAX_ZOOM, Math.max(current.zoom + 2, 9)));
+  }
+
+  return (
+    <div
+      ref={mapElementRef}
+      className="map-canvas osm-map"
+      aria-label="台灣即時影像地圖"
+      onPointerCancel={handlePointerUp}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onWheel={handleWheel}
+      role="application"
+    >
+      <div className="osm-tile-layer" aria-hidden="true">
+        {tiles.map((tile) => (
+          <img
+            alt=""
+            className="osm-tile"
+            draggable={false}
+            key={tile.key}
+            src={tile.src}
+            style={positionStyle(tile.left, tile.top, TILE_SIZE, TILE_SIZE)}
+          />
+        ))}
+      </div>
+
+      {radarOverlay && radarBox && (
+        <img
+          alt=""
+          className="osm-radar-overlay"
+          draggable={false}
+          src={radarOverlay.imageUrl}
+          style={{
+            ...positionStyle(radarBox.left, radarBox.top, radarBox.width, radarBox.height),
+            opacity: radarOpacity
+          }}
+        />
+      )}
+
+      {userMarker && (
+        <>
+          <div
+            className="osm-user-radius"
+            style={positionStyle(
+              userMarker.left - userRadiusPixels,
+              userMarker.top - userRadiusPixels,
+              userRadiusPixels * 2,
+              userRadiusPixels * 2
+            )}
+          />
+          <div className="osm-user-marker" style={markerPositionStyle(userMarker.left, userMarker.top)} />
+        </>
+      )}
+
+      {searchMarker && (
+        <div
+          className="osm-search-marker"
+          style={markerPositionStyle(searchMarker.left, searchMarker.top)}
+          title={searchPlace?.title}
+        >
+          <span>P</span>
+        </div>
+      )}
+
+      <div className="osm-marker-layer">
+        {mapItems.map((item) =>
+          item.kind === "cluster" ? (
+            <button
+              aria-label={`${item.count} 個點位`}
+              className="osm-cluster"
+              key={item.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                zoomToCluster(item);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={markerPositionStyle(item.left, item.top)}
+              title={`${item.count} 個點位`}
+              type="button"
+            >
+              {formatClusterCount(item.count)}
+            </button>
+          ) : (
+            <button
+              aria-label={item.camera.title}
+              className={`osm-marker marker-pin ${item.camera.category}${item.selected ? " selected" : ""}`}
+              key={item.camera.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelectCamera(item.camera);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={markerPositionStyle(item.left, item.top)}
+              title={item.camera.title}
+              type="button"
+            >
+              <span />
+            </button>
+          )
+        )}
+      </div>
+
+      <div className="osm-map-controls" aria-label="地圖縮放">
+        <button type="button" onClick={() => zoomBy(1)} aria-label="放大地圖">
+          +
+        </button>
+        <button type="button" onClick={() => zoomBy(-1)} aria-label="縮小地圖">
+          -
+        </button>
+      </div>
+
+      <a className="osm-attribution" href="https://www.openstreetmap.org/copyright" rel="noreferrer" target="_blank">
+        OpenStreetMap
+      </a>
+    </div>
+  );
 }
 
-function toLatLng(location: { lat: number; lon: number }): google.maps.LatLngLiteral {
-  return { lat: location.lat, lng: location.lon };
+function tilesForProjection(projection: ViewProjection): Tile[] {
+  const tileCount = 2 ** projection.view.zoom;
+  const minTileX = Math.floor(projection.topLeft.x / TILE_SIZE);
+  const maxTileX = Math.floor((projection.topLeft.x + projection.size.width) / TILE_SIZE);
+  const minTileY = Math.max(0, Math.floor(projection.topLeft.y / TILE_SIZE));
+  const maxTileY = Math.min(tileCount - 1, Math.floor((projection.topLeft.y + projection.size.height) / TILE_SIZE));
+  const tiles: Tile[] = [];
+
+  for (let tileX = minTileX; tileX <= maxTileX; tileX += 1) {
+    for (let tileY = minTileY; tileY <= maxTileY; tileY += 1) {
+      const wrappedX = positiveModulo(tileX, tileCount);
+      tiles.push({
+        key: `${projection.view.zoom}:${tileX}:${tileY}`,
+        left: tileX * TILE_SIZE - projection.topLeft.x,
+        src: `https://tile.openstreetmap.org/${projection.view.zoom}/${wrappedX}/${tileY}.png`,
+        top: tileY * TILE_SIZE - projection.topLeft.y
+      });
+    }
+  }
+
+  return tiles;
 }
 
-function circleBounds(center: google.maps.LatLngLiteral, radiusMeters: number) {
-  const earthRadiusMeters = 6_378_137;
-  const latOffset = (radiusMeters / earthRadiusMeters) * (180 / Math.PI);
-  const lngOffset = latOffset / Math.cos((center.lat * Math.PI) / 180);
+function projectCameras(cameras: Camera[], projection: ViewProjection, selectedCameraId?: string): ProjectedMapItem[] {
+  const visible = cameras
+    .map((camera) => {
+      const point = projectedLocation(camera, projection);
+      return {
+        camera,
+        kind: "camera" as const,
+        left: point.left,
+        selected: camera.id === selectedCameraId,
+        top: point.top
+      };
+    })
+    .filter(({ left, selected, top }) => {
+      if (selected) return true;
+      return (
+        left >= -VIEWPORT_PADDING_PX &&
+        left <= projection.size.width + VIEWPORT_PADDING_PX &&
+        top >= -VIEWPORT_PADDING_PX &&
+        top <= projection.size.height + VIEWPORT_PADDING_PX
+      );
+    });
 
+  const clusterSize = clusterGridSize(projection.view.zoom);
+  if (!clusterSize) {
+    return visible;
+  }
+
+  const singles: ProjectedCamera[] = [];
+  const buckets = new Map<string, ProjectedCamera[]>();
+
+  visible.forEach((item) => {
+    if (item.selected) {
+      singles.push(item);
+      return;
+    }
+
+    const key = `${Math.floor(item.left / clusterSize)}:${Math.floor(item.top / clusterSize)}`;
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.push(item);
+    } else {
+      buckets.set(key, [item]);
+    }
+  });
+
+  const clustered: ProjectedMapItem[] = [...singles];
+  buckets.forEach((items, key) => {
+    if (items.length === 1) {
+      clustered.push(items[0]);
+      return;
+    }
+
+    clustered.push({
+      cameras: items.map((item) => item.camera),
+      count: items.length,
+      id: `cluster:${projection.view.zoom}:${key}`,
+      kind: "cluster",
+      left: average(items.map((item) => item.left)),
+      top: average(items.map((item) => item.top))
+    });
+  });
+
+  return clustered;
+}
+
+function projectedLocation(location: { lat: number; lon: number }, projection: ViewProjection) {
+  const point = project(location, projection.view.zoom);
   return {
-    east: center.lng + lngOffset,
-    north: center.lat + latOffset,
-    south: center.lat - latOffset,
-    west: center.lng - lngOffset
+    left: point.x - projection.topLeft.x,
+    top: point.y - projection.topLeft.y
   };
 }
 
-function markerIcon(color: string, selected: boolean): google.maps.Symbol {
+function projectedGeoBounds(
+  bounds: RadarOverlayResponse["bounds"],
+  projection: ViewProjection
+): { left: number; top: number; width: number; height: number } {
+  const northWest = project({ lat: bounds.north, lon: bounds.west }, projection.view.zoom);
+  const southEast = project({ lat: bounds.south, lon: bounds.east }, projection.view.zoom);
+
   return {
-    fillColor: color,
-    fillOpacity: 1,
-    path: google.maps.SymbolPath.CIRCLE,
-    scale: selected ? 10 : 7,
-    strokeColor: "#ffffff",
-    strokeWeight: selected ? 4 : 3
+    height: southEast.y - northWest.y,
+    left: northWest.x - projection.topLeft.x,
+    top: northWest.y - projection.topLeft.y,
+    width: southEast.x - northWest.x
   };
 }
 
-function cameraMarkerKey(id: string) {
-  return `camera:${id}`;
+function fitLocations(locations: Array<{ lat: number; lon: number }>, size: Size, fallbackZoom: number): ViewState {
+  if (!locations.length || !size.width || !size.height) {
+    return normalizeView({ center: TAIWAN_CENTER, zoom: fallbackZoom });
+  }
+
+  if (locations.length === 1) {
+    return normalizeView({ center: locations[0], zoom: Math.max(fallbackZoom, 14) });
+  }
+
+  const points = locations.map((location) => project(location, 0));
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const usableWidth = Math.max(1, size.width - VIEWPORT_PADDING_PX * 2);
+  const usableHeight = Math.max(1, size.height - VIEWPORT_PADDING_PX * 2);
+  const dx = Math.max(0.000001, maxX - minX);
+  const dy = Math.max(0.000001, maxY - minY);
+  const zoom = clamp(Math.floor(Math.min(Math.log2(usableWidth / dx), Math.log2(usableHeight / dy))), MIN_ZOOM, MAX_ZOOM);
+
+  return normalizeView({
+    center: unproject(
+      {
+        x: (minX + maxX) / 2,
+        y: (minY + maxY) / 2
+      },
+      0
+    ),
+    zoom
+  });
 }
 
-function boundsToLiteral(bounds: google.maps.LatLngBounds): google.maps.LatLngBoundsLiteral {
-  const northEast = bounds.getNorthEast();
-  const southWest = bounds.getSouthWest();
+function project(location: { lat: number; lon: number }, zoom: number): Point {
+  const lat = clamp(location.lat, -85.05112878, 85.05112878);
+  const worldSize = TILE_SIZE * 2 ** zoom;
+  const sinLat = Math.sin((lat * Math.PI) / 180);
+
   return {
-    east: northEast.lng(),
-    north: northEast.lat(),
-    south: southWest.lat(),
-    west: southWest.lng()
+    x: ((normalizeLongitude(location.lon) + 180) / 360) * worldSize,
+    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * worldSize
   };
 }
 
-function padBounds(bounds: google.maps.LatLngBoundsLiteral, ratio: number): google.maps.LatLngBoundsLiteral {
-  const latPadding = Math.max(0.01, (bounds.north - bounds.south) * ratio);
-  const lngPadding = Math.max(0.01, (bounds.east - bounds.west) * ratio);
+function unproject(point: Point, zoom: number): { lat: number; lon: number } {
+  const worldSize = TILE_SIZE * 2 ** zoom;
+  const y = clamp(point.y, 0, worldSize);
+  const lon = (point.x / worldSize) * 360 - 180;
+  const latRadians = Math.atan(Math.sinh(Math.PI - (2 * Math.PI * y) / worldSize));
 
   return {
-    east: bounds.east + lngPadding,
-    north: bounds.north + latPadding,
-    south: bounds.south - latPadding,
-    west: bounds.west - lngPadding
+    lat: (latRadians * 180) / Math.PI,
+    lon: normalizeLongitude(lon)
   };
 }
 
-function isWithinBounds(item: { lat: number; lon: number }, bounds: google.maps.LatLngBoundsLiteral) {
-  return item.lat >= bounds.south && item.lat <= bounds.north && item.lon >= bounds.west && item.lon <= bounds.east;
+function normalizeView(view: ViewState): ViewState {
+  return {
+    center: {
+      lat: clamp(view.center.lat, 20, 26.5),
+      lon: clamp(view.center.lon, 118, 123)
+    },
+    zoom: clamp(Math.round(view.zoom), MIN_ZOOM, MAX_ZOOM)
+  };
 }
 
-function mapStylesForTheme(theme: TimeTheme) {
-  return theme === "night" ? nightMapStyles : dayMapStyles;
+function metersPerPixel(lat: number, zoom: number) {
+  return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
 }
 
-function mapBackgroundColor(theme: TimeTheme) {
-  return theme === "night" ? "#111827" : "#e5f1f0";
+function clusterGridSize(zoom: number) {
+  if (zoom >= 13) return 0;
+  if (zoom >= 11) return 42;
+  if (zoom >= 9) return 54;
+  return 70;
+}
+
+function averageLocation(cameras: Camera[]) {
+  return {
+    lat: average(cameras.map((camera) => camera.lat)),
+    lon: average(cameras.map((camera) => camera.lon))
+  };
+}
+
+function average(values: number[]) {
+  return values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+}
+
+function formatClusterCount(count: number) {
+  return count >= 1000 ? `${Math.round(count / 100) / 10}k` : String(count);
+}
+
+function positionStyle(left: number, top: number, width: number, height: number): CSSProperties {
+  return {
+    height,
+    left,
+    top,
+    width
+  };
+}
+
+function markerPositionStyle(left: number, top: number): CSSProperties {
+  return {
+    left,
+    top
+  };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeLongitude(lon: number) {
+  return ((((lon + 180) % 360) + 360) % 360) - 180;
+}
+
+function positiveModulo(value: number, divisor: number) {
+  return ((value % divisor) + divisor) % divisor;
 }

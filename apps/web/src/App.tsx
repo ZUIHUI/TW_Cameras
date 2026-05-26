@@ -16,11 +16,20 @@ import {
   X
 } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
-import { getCameras, getEnvironment, getEnvironmentByCoordinate, getNearbyTourism, getRadarOverlay, getRainfallNearby } from "./api";
+import {
+  getCameras,
+  getEnvironment,
+  getEnvironmentByCoordinate,
+  getGoogleNearbyRestaurants,
+  getNearbyTourism,
+  getPlaceDetails,
+  getPlacePredictions,
+  getRadarOverlay,
+  getRainfallNearby
+} from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
 import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
-import { GOOGLE_MAPS_API_KEY, loadGooglePlaces, searchGoogleNearbyRestaurants } from "./googleMaps";
 import { getCurrentTimeTheme, type TimeTheme } from "./timeTheme";
 import type {
   Camera,
@@ -29,6 +38,7 @@ import type {
   EnvironmentSummary,
   GoogleRestaurantItem,
   NearbyTourismResponse,
+  PlacePrediction,
   RadarOverlayResponse,
   RainfallResponse,
   SearchPlace,
@@ -57,7 +67,7 @@ export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
   const [selectedCamera, setSelectedCamera] = useState<Camera | undefined>();
   const [searchPlace, setSearchPlace] = useState<SearchPlace | undefined>();
-  const [placePredictions, setPlacePredictions] = useState<google.maps.places.AutocompletePrediction[]>([]);
+  const [placePredictions, setPlacePredictions] = useState<PlacePrediction[]>([]);
   const [placesError, setPlacesError] = useState("");
   const [environment, setEnvironment] = useState<EnvironmentSummary | undefined>();
   const [mapEnvironment, setMapEnvironment] = useState<EnvironmentSummary | undefined>();
@@ -390,14 +400,14 @@ export default function App() {
     setGoogleRestaurants([]);
     setGoogleRestaurantsError("");
 
-    if (!shouldLoadRecommendations || !nearbyTourismTarget || !GOOGLE_MAPS_API_KEY) {
+    if (!shouldLoadRecommendations || !nearbyTourismTarget) {
       setGoogleRestaurantsLoading(false);
       return;
     }
 
     let active = true;
     setGoogleRestaurantsLoading(true);
-    searchGoogleNearbyRestaurants({ lat: nearbyTourismTarget.lat, lon: nearbyTourismTarget.lon })
+    getGoogleNearbyRestaurants(nearbyTourismTarget.lat, nearbyTourismTarget.lon)
       .then((items) => {
         if (active) setGoogleRestaurants(items);
       })
@@ -421,15 +431,14 @@ export default function App() {
     const keyword = query.trim();
     setPlacesError("");
 
-    if (!GOOGLE_MAPS_API_KEY || keyword.length < 2) {
+    if (keyword.length < 2) {
       setPlacePredictions([]);
       return;
     }
 
     let active = true;
     const timeout = window.setTimeout(() => {
-      loadGooglePlaces()
-        .then(() => getPlacePredictions(keyword))
+      getPlacePredictions(keyword)
         .then((predictions) => {
           if (active) setPlacePredictions(predictions.slice(0, 5));
         })
@@ -756,10 +765,10 @@ export default function App() {
     setMobileSheetSnap("half");
   }
 
-  async function selectPlacePrediction(prediction: google.maps.places.AutocompletePrediction) {
+  async function selectPlacePrediction(prediction: PlacePrediction) {
     setSearching(true);
     try {
-      const place = await getPlaceDetails(prediction.place_id);
+      const place = await getPlaceDetails(prediction.placeId);
       activatePlaceSearch(place);
     } catch (err) {
       setPlacesError(err instanceof Error ? err.message : String(err));
@@ -780,7 +789,7 @@ export default function App() {
 
       const firstPrediction = placePredictions[0];
       if (firstPrediction) {
-        const place = await getPlaceDetails(firstPrediction.place_id);
+        const place = await getPlaceDetails(firstPrediction.placeId);
         activatePlaceSearch(place);
         return;
       }
@@ -790,7 +799,7 @@ export default function App() {
 
       const prediction = (await getPlacePredictions(keyword))[0];
       if (prediction) {
-        const place = await getPlaceDetails(prediction.place_id);
+        const place = await getPlaceDetails(prediction.placeId);
         activatePlaceSearch(place);
       }
     } catch (err) {
@@ -1061,13 +1070,13 @@ export default function App() {
             {placePredictions.map((prediction) => (
               <button
                 className="search-result-item place"
-                key={prediction.place_id}
+                key={prediction.placeId}
                 onClick={() => void selectPlacePrediction(prediction)}
                 disabled={searching}
                 type="button"
               >
-                <strong>{prediction.structured_formatting.main_text}</strong>
-                <small>{prediction.structured_formatting.secondary_text || "Google 地點"}</small>
+                <strong>{prediction.mainText}</strong>
+                <small>{prediction.secondaryText || "Google 地點"}</small>
               </button>
             ))}
             {placesError && <div className="search-result-note">{placesError}</div>}
@@ -1452,13 +1461,13 @@ export default function App() {
               {placePredictions.map((prediction) => (
                 <button
                   className="search-result-item place"
-                  key={prediction.place_id}
+                  key={prediction.placeId}
                   onClick={() => void selectPlacePrediction(prediction)}
                   disabled={searching}
                   type="button"
                 >
-                  <strong>{prediction.structured_formatting.main_text}</strong>
-                  <small>{prediction.structured_formatting.secondary_text || "Google 地點"}</small>
+                  <strong>{prediction.mainText}</strong>
+                  <small>{prediction.secondaryText || "Google 地點"}</small>
                 </button>
               ))}
               {placesError && <div className="search-result-note">{placesError}</div>}
@@ -2263,69 +2272,6 @@ function MapLegend() {
       </span>
     </div>
   );
-}
-
-async function getPlacePredictions(input: string): Promise<google.maps.places.AutocompletePrediction[]> {
-  if (!GOOGLE_MAPS_API_KEY) {
-    return [];
-  }
-
-  await loadGooglePlaces();
-  const service = new google.maps.places.AutocompleteService();
-
-  return new Promise((resolve, reject) => {
-    service.getPlacePredictions(
-      {
-        componentRestrictions: { country: "tw" },
-        input,
-        language: "zh-TW"
-      },
-      (predictions, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
-          resolve(predictions);
-          return;
-        }
-
-        if (status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-          resolve([]);
-          return;
-        }
-
-        reject(new Error(`Google Places search failed: ${status}`));
-      }
-    );
-  });
-}
-
-async function getPlaceDetails(placeId: string): Promise<SearchPlace> {
-  await loadGooglePlaces();
-  const host = document.createElement("div");
-  const service = new google.maps.places.PlacesService(host);
-
-  return new Promise((resolve, reject) => {
-    service.getDetails(
-      {
-        fields: ["formatted_address", "geometry", "name", "place_id"],
-        language: "zh-TW",
-        placeId
-      },
-      (place, status) => {
-        const location = place?.geometry?.location;
-        if (status === google.maps.places.PlacesServiceStatus.OK && place && location) {
-          resolve({
-            id: place.place_id || placeId,
-            title: place.name || place.formatted_address || "Google 地點",
-            address: place.formatted_address || "",
-            lat: location.lat(),
-            lon: location.lng()
-          });
-          return;
-        }
-
-        reject(new Error(`Google place details failed: ${status}`));
-      }
-    );
-  });
 }
 
 function loadFavorites(): Set<string> {

@@ -6,6 +6,14 @@ import {
   getEnvironmentSummaryByCoordinate,
   parseCoordinateEnvironmentQuery
 } from "./adapters/environment.js";
+import {
+  getGoogleNearbyRestaurants,
+  getGooglePlaceDetails,
+  getGooglePlacePredictions,
+  parseNearbyRestaurantsQuery,
+  parsePlaceAutocompleteQuery,
+  parsePlaceDetailsQuery
+} from "./adapters/googlePlaces.js";
 import { getNearbyTourismSummary, parseNearbyTourismQuery } from "./adapters/nearbyTourism.js";
 import { getRadarOverlay } from "./adapters/radar.js";
 import { getNearbyRainfallSummary, parseRainfallQuery } from "./adapters/rainfall.js";
@@ -150,6 +158,36 @@ app.get<{ Querystring: { lat?: string; lon?: string; radius?: string } }>("/api/
       error: summary.error
     }
   };
+});
+
+app.get<{
+  Querystring: { kind?: string; input?: string; placeId?: string; lat?: string; lon?: string; radius?: string };
+}>("/api/google-places", async (request, reply) => {
+  if (request.query.kind === "nearby-restaurants") {
+    const query = parseNearbyRestaurantsQuery(request.query);
+    if (!query.ok) {
+      return reply.code(400).send({ error: "invalid_query", message: query.message });
+    }
+    return getGoogleNearbyRestaurants(query.value);
+  }
+
+  if (request.query.kind === "autocomplete") {
+    const query = parsePlaceAutocompleteQuery(request.query);
+    if (!query.ok) {
+      return reply.code(400).send({ error: "invalid_query", message: query.message });
+    }
+    return getGooglePlacePredictions(query.value.input);
+  }
+
+  if (request.query.kind === "details") {
+    const query = parsePlaceDetailsQuery(request.query);
+    if (!query.ok) {
+      return reply.code(400).send({ error: "invalid_query", message: query.message });
+    }
+    return getGooglePlaceDetails(query.value.placeId);
+  }
+
+  return reply.code(400).send({ error: "invalid_query", message: "kind is required." });
 });
 
 app.get("/api/sources", async () => ({

@@ -182,6 +182,22 @@ export interface NearbyTourismItem {
   updatedAt: string;
 }
 
+export interface GoogleRestaurantItem {
+  id: string;
+  type: "restaurant";
+  source: "Google Places";
+  title: string;
+  address: string;
+  distanceMeters: number;
+  lat: number;
+  lon: number;
+  googleMapsUrl: string;
+  rating?: number;
+  userRatingCount?: number;
+  priceLevel?: string;
+  businessStatus?: string;
+}
+
 export interface NearbyTourismSummary {
   origin: {
     lat: number;
@@ -202,4 +218,19 @@ export interface SourceInfo {
   licenseUrl: string;
   cadence: string;
   notes: string;
+}
+
+export interface PlacePrediction {
+  placeId: string;
+  description: string;
+  mainText: string;
+  secondaryText: string;
+}
+
+export interface SearchPlace {
+  id: string;
+  title: string;
+  address: string;
+  lat: number;
+  lon: number;
 }

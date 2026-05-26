@@ -93,6 +93,165 @@ input:disabled {
   background: #dfe9e3;
 }
 
+.osm-map {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.osm-tile-layer,
+.osm-marker-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.osm-tile {
+  position: absolute;
+  display: block;
+  height: 256px;
+  width: 256px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.osm-radar-overlay {
+  position: absolute;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.osm-marker-layer {
+  pointer-events: none;
+  z-index: 25;
+}
+
+.osm-marker {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  border: 0;
+  padding: 0;
+  pointer-events: auto;
+}
+
+.osm-marker.selected {
+  width: 28px;
+  height: 28px;
+  z-index: 35;
+}
+
+.osm-cluster {
+  position: absolute;
+  z-index: 28;
+  min-width: 32px;
+  height: 32px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #183c35;
+  box-shadow: 0 10px 24px rgba(17, 36, 29, 0.32);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 8px;
+  pointer-events: auto;
+}
+
+.osm-cluster:hover {
+  background: #11674d;
+}
+
+.osm-user-radius {
+  position: absolute;
+  z-index: 20;
+  border: 2px solid rgba(37, 99, 235, 0.84);
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.14);
+  pointer-events: none;
+}
+
+.osm-user-marker,
+.osm-search-marker {
+  position: absolute;
+  z-index: 34;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.osm-user-marker {
+  width: 18px;
+  height: 18px;
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.42);
+}
+
+.osm-search-marker span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  background: #dc2626;
+  box-shadow: 0 8px 22px rgba(127, 29, 29, 0.38);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.osm-map-controls {
+  position: absolute;
+  top: 82px;
+  right: 18px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(31, 75, 58, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 28px rgba(17, 36, 29, 0.18);
+}
+
+.osm-map-controls button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-bottom: 1px solid rgba(31, 75, 58, 0.12);
+  background: transparent;
+  color: #183c35;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.osm-map-controls button:last-child {
+  border-bottom: 0;
+}
+
+.osm-map-controls button:hover {
+  background: rgba(17, 103, 77, 0.08);
+}
+
+.osm-attribution {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 30;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #39554b;
+  padding: 3px 6px;
+  font-size: 11px;
+  line-height: 1;
+  text-decoration: none;
+}
+
 .map-empty-state {
   display: flex;
   align-items: center;
@@ -1921,6 +2080,30 @@ h3 {
 
 .app-shell.theme-night .map-canvas {
   background: #111827;
+}
+
+.app-shell.theme-night .osm-tile {
+  filter: brightness(0.72) saturate(0.72) contrast(1.08);
+}
+
+.app-shell.theme-night .osm-radar-overlay {
+  mix-blend-mode: screen;
+}
+
+.app-shell.theme-night .osm-map-controls,
+.app-shell.theme-night .osm-attribution {
+  background: rgba(17, 28, 34, 0.88);
+  border-color: var(--ui-border-strong);
+  color: var(--ui-text);
+}
+
+.app-shell.theme-night .osm-map-controls button {
+  border-color: var(--ui-border);
+  color: var(--ui-heading);
+}
+
+.app-shell.theme-night .osm-map-controls button:hover {
+  background: rgba(40, 185, 134, 0.14);
 }
 
 .app-shell.theme-night .control-panel,
