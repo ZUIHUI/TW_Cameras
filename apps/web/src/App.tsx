@@ -594,6 +594,12 @@ export default function App() {
     focusNextLocationRef.current = false;
   }
 
+  function handleUserMapGesture() {
+    pauseLocationFollow();
+    setCameraFilter("all");
+    setFocusedListFilter(undefined);
+  }
+
   function clearLocationWatch() {
     if (locationWatchIdRef.current !== undefined && navigator.geolocation) {
       navigator.geolocation.clearWatch(locationWatchIdRef.current);
@@ -1380,7 +1386,7 @@ export default function App() {
         theme={timeTheme}
         focusCameras={focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
-        onUserMapGesture={pauseLocationFollow}
+        onUserMapGesture={handleUserMapGesture}
         onViewportTargetChange={setMapViewportTarget}
       />
 
