@@ -62,6 +62,7 @@ type MobileSheet = "search" | "layers" | "rain" | "nearby" | "favorites" | "deta
 type ObservationTarget = { lat: number; lon: number; title: string };
 const LOCATION_FOLLOW_THRESHOLD_METERS = 25;
 const MOBILE_BREAKPOINT_QUERY = "(max-width: 980px)";
+const RADAR_AUTO_REFRESH_MS = 10 * 60 * 1000;
 
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
@@ -122,6 +123,7 @@ export default function App() {
   const [themeOverride, setThemeOverride] = useState<TimeTheme | undefined>(() => loadTimeThemePreference());
   const [showPanelTopButton, setShowPanelTopButton] = useState(false);
   const [manualRefreshKey, setManualRefreshKey] = useState(0);
+  const [radarAutoRefreshKey, setRadarAutoRefreshKey] = useState(0);
   const locationRequestInFlight = useRef(false);
   const locationWatchIdRef = useRef<number | undefined>(undefined);
   const lastFollowLocationRef = useRef<UserLocation | undefined>(undefined);
@@ -313,6 +315,20 @@ export default function App() {
   }, [manualRefreshKey, nearbyTourismTarget, shouldLoadRecommendations]);
 
   useEffect(() => {
+    if (!visibleLayers.radar) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setRadarAutoRefreshKey((key) => key + 1);
+    }, RADAR_AUTO_REFRESH_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [visibleLayers.radar]);
+
+  useEffect(() => {
     setRadarOverlayError("");
 
     if (!visibleLayers.radar) {
@@ -340,7 +356,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [manualRefreshKey, visibleLayers.radar]);
+  }, [manualRefreshKey, radarAutoRefreshKey, visibleLayers.radar]);
 
   useEffect(() => {
     setRainfall(undefined);
