@@ -21,10 +21,6 @@ const dayMapStyles: google.maps.MapTypeStyle[] = [
     stylers: [{ visibility: "off" }]
   },
   {
-    featureType: "transit",
-    stylers: [{ visibility: "off" }]
-  },
-  {
     featureType: "water",
     stylers: [{ color: "#cfe8f3" }]
   }
@@ -34,10 +30,6 @@ const nightMapStyles: google.maps.MapTypeStyle[] = [
   {
     elementType: "geometry",
     stylers: [{ color: "#1f2937" }]
-  },
-  {
-    elementType: "labels.icon",
-    stylers: [{ visibility: "off" }]
   },
   {
     elementType: "labels.text.fill",
@@ -66,6 +58,11 @@ const nightMapStyles: google.maps.MapTypeStyle[] = [
     featureType: "poi",
     elementType: "labels.text.fill",
     stylers: [{ color: "#9ca3af" }]
+  },
+  {
+    featureType: "poi",
+    elementType: "labels.icon",
+    stylers: [{ visibility: "simplified" }]
   },
   {
     featureType: "poi.business",
@@ -97,8 +94,19 @@ const nightMapStyles: google.maps.MapTypeStyle[] = [
     stylers: [{ color: "#0f172a" }]
   },
   {
-    featureType: "transit",
-    stylers: [{ visibility: "off" }]
+    featureType: "transit.station",
+    elementType: "labels.icon",
+    stylers: [{ visibility: "on" }]
+  },
+  {
+    featureType: "transit.station",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#c7d2fe" }, { visibility: "on" }]
+  },
+  {
+    featureType: "transit.station",
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#111827" }, { visibility: "on" }]
   },
   {
     featureType: "water",
