@@ -9,9 +9,14 @@ interface TdxTokenResponse {
 
 interface TdxGetOptions {
   auth?: "auto" | "required" | "none";
+  apiBase?: "basic-v2" | "tourism-odata-v2";
 }
 
 const TDX_PUBLIC_USER_AGENT = "Mozilla/5.0 TaiwanLiveCameraPrototype/0.1";
+const TDX_API_BASE_URLS: Record<NonNullable<TdxGetOptions["apiBase"]>, string> = {
+  "basic-v2": "https://tdx.transportdata.tw/api/basic/v2",
+  "tourism-odata-v2": "https://tdx.transportdata.tw/api/tourism/service/odata/V2"
+};
 
 let tokenCache: { token: string; expiresAt: number } | undefined;
 let tokenRequest: Promise<string> | undefined;
@@ -70,7 +75,8 @@ export async function tdxGet<T>(
   options: TdxGetOptions = {}
 ): Promise<T> {
   const path = resourcePath.startsWith("/") ? resourcePath : `/${resourcePath}`;
-  const url = new URL(`https://tdx.transportdata.tw/api/basic/v2${path}`);
+  const apiBase = options.apiBase ?? "basic-v2";
+  const url = new URL(`${TDX_API_BASE_URLS[apiBase]}${path}`);
 
   url.searchParams.set("$format", "JSON");
   for (const [key, value] of Object.entries(params)) {

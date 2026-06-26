@@ -81,7 +81,7 @@ GOOGLE_MAPS_API_KEY
 VITE_GOOGLE_MAPS_API_KEY
 ```
 
-`TDX_CLIENT_ID` and `TDX_CLIENT_SECRET` can stay empty while waiting for TDX approval. The API will try TDX public reads for CCTV/VD metadata; when credentials are present, it uses the OAuth token first and falls back to public reads if the token is rate-limited.
+`TDX_CLIENT_ID` and `TDX_CLIENT_SECRET` can stay empty while waiting for TDX approval for CCTV/VD metadata; those requests try TDX public reads and use the OAuth token first when credentials are present. Tourism V2.1 nearby recommendations require TDX credentials.
 
 `TDX_CITY_CODES` defaults to `all` so the city CCTV catalog covers Taiwan. Set a comma-separated list like `Taipei,NewTaipei,Taichung` only when you want to limit TDX requests during development.
 
@@ -105,13 +105,13 @@ If CWA rainfall or radar data is unavailable, the rainy status panel degrades to
 
 ## Tourism Nearby Data
 
-The app includes a lightweight "nearby fun" panel powered by Tourism Administration open data through TDX Tourism APIs. It uses:
+The app includes a lightweight "nearby fun" panel powered by Tourism Administration open data through TDX Tourism V2.1 APIs. It uses the TDX tourism OData service:
 
-- Scenic spots: `/v2/Tourism/ScenicSpot`
-- Restaurants: `/v2/Tourism/Restaurant`
-- Activities: `/v2/Tourism/Activity`
+- Attractions: `/api/tourism/service/odata/V2/Tourism/Attraction`
+- Restaurants: `/api/tourism/service/odata/V2/Tourism/Restaurant`
+- Events: `/api/tourism/service/odata/V2/Tourism/Event`
 
-The local API normalizes these sources into `GET /api/nearby-tourism`, filters by distance from the selected camera, Google place, or current location, and returns up to 8 items per category. Tourism data is cached for 12 hours; nearby query results are cached briefly by coordinate bucket to reduce repeated upstream calls.
+The local API normalizes these sources into `GET /api/nearby-tourism`, queries a bounded TDX OData area around the selected camera, Google place, or current location, filters by exact distance, and returns up to 8 items per category. Nearby query results are cached briefly by coordinate bucket to reduce repeated upstream calls.
 
 The web app calls the internal `/api/google-places` proxy to improve the restaurant recommendation group with Google Places. Google Places restaurants are shown first when available; if Google Places is unavailable or returns no restaurants, the UI falls back to TDX Tourism restaurant data.
 

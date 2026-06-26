@@ -1,13 +1,16 @@
 import { timedCache } from "../cache.js";
+import { UpstreamError } from "../http.js";
 import { tdxGet } from "../tdx.js";
-import type { NearbyTourismItem, NearbyTourismSummary, SourceError, TourismItemType } from "../types.js";
+import type { NearbyTourismItem, NearbyTourismSummary, TourismItemType } from "../types.js";
 
-const TOURISM_CATALOG_TTL_MS = 12 * 60 * 60 * 1000;
 const NEARBY_TOURISM_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_RADIUS_METERS = 3000;
 const MIN_RADIUS_METERS = 1000;
 const MAX_RADIUS_METERS = 10000;
 const GROUP_LIMIT = 8;
+const TDX_TOURISM_TOP_LIMIT = 500;
+const TDX_TOURISM_DATASET_GAP_MS = 350;
+const TDX_TOURISM_RETRY_DELAYS_MS = [1200, 2500];
 
 interface TourismDatasetDefinition {
   type: TourismItemType;
@@ -24,14 +27,6 @@ type TourismCatalogItem = Omit<NearbyTourismItem, "distanceMeters"> & {
   endTime?: string;
 };
 
-interface TourismCatalog {
-  attractions: TourismCatalogItem[];
-  restaurants: TourismCatalogItem[];
-  activities: TourismCatalogItem[];
-  sourceErrors: SourceError[];
-  updatedAt: string;
-}
-
 export interface NearbyTourismQuery {
   lat: number;
   lon: number;
@@ -46,8 +41,8 @@ const tourismDatasets: TourismDatasetDefinition[] = [
   {
     type: "attraction",
     group: "attractions",
-    source: "TDX Tourism / 觀光署景點",
-    endpoint: "/Tourism/ScenicSpot",
+    source: "TDX Tourism V2.1 / 觀光署景點",
+    endpoint: "/Tourism/Attraction",
     idFields: ["ScenicSpotID", "AttractionID", "ID", "Id"],
     titleFields: ["ScenicSpotName", "AttractionName", "Name"],
     descriptionFields: ["DescriptionDetail", "Description", "Remarks"]
@@ -55,7 +50,7 @@ const tourismDatasets: TourismDatasetDefinition[] = [
   {
     type: "restaurant",
     group: "restaurants",
-    source: "TDX Tourism / 觀光署餐飲",
+    source: "TDX Tourism V2.1 / 觀光署餐飲",
     endpoint: "/Tourism/Restaurant",
     idFields: ["RestaurantID", "ID", "Id"],
     titleFields: ["RestaurantName", "Name"],
@@ -64,12 +59,12 @@ const tourismDatasets: TourismDatasetDefinition[] = [
   {
     type: "activity",
     group: "activities",
-    source: "TDX Tourism / 觀光署活動",
-    endpoint: "/Tourism/Activity",
+    source: "TDX Tourism V2.1 / 觀光署活動",
+    endpoint: "/Tourism/Event",
     idFields: ["ActivityID", "EventID", "ID", "Id"],
     titleFields: ["ActivityName", "EventName", "Name"],
     descriptionFields: ["Description", "Remarks", "EventClasses"],
-    endTimeFields: ["EndTime", "EndDateTime"]
+    endTimeFields: ["EndTime", "EndDateTime", "EndDate", "EndDateTime.DateTime"]
   }
 ];
 
@@ -102,26 +97,9 @@ export async function getNearbyTourismSummary(query: NearbyTourismQuery) {
 }
 
 async function loadNearbyTourismSummary(query: NearbyTourismQuery): Promise<NearbyTourismSummary> {
-  const catalog = await getTourismCatalog();
   const origin = { lat: query.lat, lon: query.lon, radiusMeters: query.radius };
-
-  return {
+  const summary: NearbyTourismSummary = {
     origin,
-    attractions: nearbyItems(catalog.value.attractions, query),
-    restaurants: nearbyItems(catalog.value.restaurants, query),
-    activities: nearbyItems(catalog.value.activities, query),
-    sourceErrors: catalog.value.sourceErrors,
-    updatedAt: new Date().toISOString()
-  };
-}
-
-async function getTourismCatalog() {
-  return timedCache.getOrSet("tourism:catalog", TOURISM_CATALOG_TTL_MS, loadTourismCatalog);
-}
-
-async function loadTourismCatalog(): Promise<TourismCatalog> {
-  const settled = await Promise.allSettled(tourismDatasets.map(loadTourismDataset));
-  const catalog: TourismCatalog = {
     attractions: [],
     restaurants: [],
     activities: [],
@@ -129,35 +107,79 @@ async function loadTourismCatalog(): Promise<TourismCatalog> {
     updatedAt: new Date().toISOString()
   };
 
-  settled.forEach((result, index) => {
-    const dataset = tourismDatasets[index];
-    if (result.status === "fulfilled") {
-      catalog[dataset.group] = result.value;
-      return;
+  for (const [index, dataset] of tourismDatasets.entries()) {
+    try {
+      summary[dataset.group] = nearbyItems(await loadTourismDataset(dataset, query), query);
+    } catch (error) {
+      summary.sourceErrors.push({
+        source: dataset.source,
+        endpoint: dataset.endpoint,
+        message: error instanceof Error ? error.message : String(error)
+      });
     }
 
-    catalog.sourceErrors.push({
-      source: dataset.source,
-      endpoint: dataset.endpoint,
-      message: result.reason instanceof Error ? result.reason.message : String(result.reason)
-    });
-  });
+    if (index < tourismDatasets.length - 1) {
+      await sleep(TDX_TOURISM_DATASET_GAP_MS);
+    }
+  }
 
-  return catalog;
+  return summary;
 }
 
-async function loadTourismDataset(dataset: TourismDatasetDefinition): Promise<TourismCatalogItem[]> {
-  const payload = await tdxGet<unknown>(
-    dataset.endpoint,
-    {
-      "$top": "10000"
-    },
-    { auth: "auto" }
+async function loadTourismDataset(
+  dataset: TourismDatasetDefinition,
+  query: NearbyTourismQuery
+): Promise<TourismCatalogItem[]> {
+  const payload = await withTourismRetry(() =>
+    tdxGet<unknown>(
+      dataset.endpoint,
+      {
+        "$top": String(TDX_TOURISM_TOP_LIMIT),
+        "$filter": tourismBoundingFilter(query)
+      },
+      { auth: "required", apiBase: "tourism-odata-v2" }
+    )
   );
   const rows = pickArray(payload);
   return rows
     .map((row) => normalizeTourismItem(row, dataset))
     .filter((item): item is TourismCatalogItem => Boolean(item));
+}
+
+function tourismBoundingFilter(query: NearbyTourismQuery): string {
+  const latDelta = query.radius / 111_320;
+  const lonScale = Math.max(Math.cos(toRad(query.lat)), 0.01);
+  const lonDelta = query.radius / (111_320 * lonScale);
+
+  const minLat = query.lat - latDelta;
+  const maxLat = query.lat + latDelta;
+  const minLon = query.lon - lonDelta;
+  const maxLon = query.lon + lonDelta;
+
+  return [
+    `PositionLat ge ${formatODataNumber(minLat)}`,
+    `PositionLat le ${formatODataNumber(maxLat)}`,
+    `PositionLon ge ${formatODataNumber(minLon)}`,
+    `PositionLon le ${formatODataNumber(maxLon)}`
+  ].join(" and ");
+}
+
+async function withTourismRetry<T>(loader: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt <= TDX_TOURISM_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await loader();
+    } catch (error) {
+      const shouldRetry = isRetryableTourismError(error) && attempt < TDX_TOURISM_RETRY_DELAYS_MS.length;
+      if (!shouldRetry) throw error;
+      await sleep(TDX_TOURISM_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
+  throw new Error("TDX Tourism retry loop exited unexpectedly.");
+}
+
+function isRetryableTourismError(error: unknown): boolean {
+  return error instanceof UpstreamError && [429, 500, 502, 503, 504].includes(error.status);
 }
 
 function normalizeTourismItem(row: unknown, dataset: TourismDatasetDefinition): TourismCatalogItem | undefined {
@@ -186,11 +208,11 @@ function normalizeTourismItem(row: unknown, dataset: TourismDatasetDefinition): 
     type: dataset.type,
     title,
     description: trimDescription(firstString(row, dataset.descriptionFields)),
-    address: firstString(row, ["PostalAddress", "Address", "Add"]),
-    phone: firstString(row, ["Telephones", "Telephone", "Phone", "Tel"]),
+    address: firstAddress(row),
+    phone: firstPhone(row),
     lat,
     lon,
-    url: firstString(row, ["WebsiteURL", "WebsiteUrl", "Website", "Url", "MapURLs", "MapUrl"]),
+    url: firstString(row, ["WebsiteURL", "WebsiteUrl", "Website", "Url", "MapURLs", "MapUrl", "SameAsURLs"]),
     imageUrl: firstImageUrl(row),
     updatedAt,
     endTime
@@ -247,6 +269,47 @@ function firstNumber(row: Record<string, unknown>, paths: string[]): number {
   return Number.NaN;
 }
 
+function firstAddress(row: Record<string, unknown>): string {
+  const postalAddress = row.PostalAddress;
+  if (isRecord(postalAddress)) {
+    const full = firstString(row, ["PostalAddress.Address", "PostalAddress.FullAddress"]);
+    if (full) return full;
+
+    const combined = cleanText(
+      [
+        stringifyValue(postalAddress.City),
+        stringifyValue(postalAddress.Town),
+        stringifyValue(postalAddress.StreetAddress)
+      ].join("")
+    );
+
+    if (combined) return combined;
+  }
+
+  return firstString(row, ["Address", "Add"]);
+}
+
+function firstPhone(row: Record<string, unknown>): string {
+  const direct = firstString(row, ["Telephone", "Phone", "Tel", "Telephones.0.Tel", "Telephones.0.Phone"]);
+  if (direct) return direct;
+
+  const telephones = row.Telephones;
+  if (!Array.isArray(telephones)) {
+    return "";
+  }
+
+  const phones = telephones
+    .map((item) => {
+      if (!isRecord(item)) return stringifyValue(item);
+      const tel = stringifyValue(item.Tel || item.Phone || item.Number);
+      const ext = stringifyValue(item.Ext || item.Extension);
+      return ext ? `${tel}#${ext}` : tel;
+    })
+    .filter(Boolean);
+
+  return phones.slice(0, 2).join(" / ");
+}
+
 function valueAtPath(row: Record<string, unknown>, path: string): unknown {
   return path.split(".").reduce<unknown>((current, key) => {
     if (Array.isArray(current)) {
@@ -286,11 +349,14 @@ function firstImageUrl(row: Record<string, unknown>): string {
     "ImageUrl",
     "Images.0.URL",
     "Images.0.Url",
-    "Images.0.ImageUrl"
+    "Images.0.ImageUrl",
+    "Pictures.0.URL",
+    "Pictures.0.Url",
+    "Pictures.0.PictureUrl"
   ]);
   if (direct) return direct;
 
-  return findUrl(row.Images) || findUrl(row.Picture) || "";
+  return findUrl(row.Images) || findUrl(row.Picture) || findUrl(row.Pictures) || "";
 }
 
 function findUrl(value: unknown): string {
@@ -352,8 +418,16 @@ function toRad(value: number) {
   return (value * Math.PI) / 180;
 }
 
+function formatODataNumber(value: number) {
+  return value.toFixed(6);
+}
+
 function bucketCoordinate(value: number) {
   return Math.round(value * 1000) / 1000;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
