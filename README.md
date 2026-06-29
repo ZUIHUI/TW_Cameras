@@ -43,6 +43,7 @@ Local URLs:
 - `GET /api/health`
 - `GET /api/cameras`
 - `GET /api/cameras/:id`
+- `GET /api/cameras/:id/stream`
 - `GET /api/nearby-tourism?lat=25.033&lon=121.5654&radius=3000`
 - `GET /api/environment?county=臺北市`
 - `GET /api/radar`

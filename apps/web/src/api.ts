@@ -1,4 +1,5 @@
 import type {
+  Camera,
   CameraCatalogResponse,
   EnvironmentSummary,
   GoogleRestaurantItem,
@@ -72,6 +73,10 @@ function delay(ms: number) {
 
 export function getCameras(): Promise<CameraCatalogResponse> {
   return fetchJson<CameraCatalogResponse>("/cameras");
+}
+
+export function getCameraStreamUrl(camera: Pick<Camera, "id">): string {
+  return `${API_BASE_URL}/cameras/${encodeURIComponent(camera.id)}/stream`;
 }
 
 export function getEnvironment(county: string): Promise<EnvironmentSummary> {

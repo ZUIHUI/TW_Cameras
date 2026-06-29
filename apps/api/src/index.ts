@@ -1,5 +1,8 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
+import { Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { fetchCameraStreamResponse } from "./adapters/cameraStream.js";
 import { getCameraCatalog } from "./adapters/cameras.js";
 import {
   getEnvironmentSummary,
@@ -61,6 +64,29 @@ app.get<{ Params: { id: string } }>("/api/cameras/:id", async (request, reply) =
       error: catalog.error
     }
   };
+});
+
+app.get<{ Params: { id: string } }>("/api/cameras/:id/stream", async (request, reply) => {
+  const catalog = await getCameraCatalog();
+  const camera = catalog.value.cameras.find((item) => item.id === request.params.id);
+  if (!camera) {
+    return reply.code(404).send({ error: "Camera not found" });
+  }
+
+  const response = await fetchCameraStreamResponse(camera, request.url, {
+    accept: asHeaderString(request.headers.accept),
+    range: asHeaderString(request.headers.range),
+    userAgent: asHeaderString(request.headers["user-agent"])
+  });
+
+  reply.code(response.status);
+  response.headers.forEach((value, key) => reply.header(key, value));
+
+  if (!response.body) {
+    return reply.send();
+  }
+
+  return reply.send(Readable.fromWeb(response.body as unknown as NodeReadableStream<Uint8Array>));
 });
 
 app.get<{ Querystring: { county?: string; lat?: string; lon?: string } }>("/api/environment", async (request, reply) => {
@@ -211,3 +237,7 @@ app.setErrorHandler((error, _request, reply) => {
 });
 
 await app.listen({ port: config.apiPort, host: "0.0.0.0" });
+
+function asHeaderString(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value.join(", ") : value;
+}

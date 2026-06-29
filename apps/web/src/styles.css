@@ -1069,6 +1069,10 @@ h3 {
   text-align: center;
 }
 
+.stream-fallback.visible {
+  z-index: 3;
+}
+
 .fact-grid,
 .environment-grid {
   display: grid;

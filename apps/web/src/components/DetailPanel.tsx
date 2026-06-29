@@ -1,4 +1,8 @@
+import type Hls from "hls.js";
+import type { ErrorData } from "hls.js";
 import { AlertCircle, ExternalLink, Heart, ShieldCheck, Video, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { getCameraStreamUrl } from "../api";
 import type { Camera, EnvironmentSummary } from "../types";
 
 interface DetailPanelProps {
@@ -80,11 +84,13 @@ export function DetailPanel({
 }
 
 function StreamPreview({ camera }: { camera: Camera }) {
+  const streamUrl = getCameraStreamUrl(camera);
+
   if (camera.streamType === "snapshot") {
     return (
       <div className="stream-preview">
         <div className="stream-frame">
-          <img alt={`${camera.title} 即時影像`} src={camera.streamUrl} />
+          <img alt={`${camera.title} 即時影像`} src={streamUrl} />
         </div>
         <SourceLink camera={camera} />
       </div>
@@ -100,7 +106,7 @@ function StreamPreview({ camera }: { camera: Camera }) {
             onError={(event) => {
               event.currentTarget.style.display = "none";
             }}
-            src={camera.streamUrl}
+            src={streamUrl}
           />
           <div className="stream-fallback">
             <Video size={28} />
@@ -116,14 +122,10 @@ function StreamPreview({ camera }: { camera: Camera }) {
     return (
       <div className="stream-preview">
         <div className="stream-frame webpage">
-          <iframe
-            allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-            allowFullScreen
-            referrerPolicy="no-referrer"
-            sandbox="allow-forms allow-same-origin allow-scripts allow-presentation"
-            src={camera.streamUrl}
-            title={`${camera.title} 即時影像播放頁`}
-          />
+          <div className="stream-fallback">
+            <Video size={28} />
+            <span>此來源禁止內嵌，請開啟來源檢視。</span>
+          </div>
         </div>
         <SourceLink camera={camera} />
       </div>
@@ -133,14 +135,95 @@ function StreamPreview({ camera }: { camera: Camera }) {
   return (
     <div className="stream-preview">
       <div className="stream-frame">
-        <video controls muted playsInline preload="metadata" src={camera.streamUrl} />
-        <div className="stream-fallback">
-          <Video size={28} />
-          <span>此瀏覽器可能不支援 HLS，Safari 或 iOS 上通常可直接播放。</span>
-        </div>
+        <HlsPlayer title={camera.title} url={streamUrl} />
       </div>
       <SourceLink camera={camera} />
     </div>
+  );
+}
+
+function HlsPlayer({ title, url }: { title: string; url: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let cancelled = false;
+    let hls: Hls | undefined;
+
+    setErrorMessage("");
+    video.removeAttribute("src");
+    video.load();
+
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = url;
+      video.load();
+      return;
+    }
+
+    void import("hls.js/light")
+      .then(({ default: Hls }) => {
+        if (cancelled || !videoRef.current) return;
+
+        if (!Hls.isSupported()) {
+          setErrorMessage("此瀏覽器不支援 HLS 播放，請開啟來源檢視。");
+          return;
+        }
+
+        const nextHls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false
+        });
+        hls = nextHls;
+
+        nextHls.on(Hls.Events.ERROR, (_event, data: ErrorData) => {
+          if (!data.fatal) return;
+
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            nextHls.recoverMediaError();
+            return;
+          }
+
+          setErrorMessage("即時影像暫時無法播放，請稍後再試或開啟來源檢視。");
+          nextHls.destroy();
+          hls = undefined;
+        });
+
+        nextHls.loadSource(url);
+        nextHls.attachMedia(videoRef.current);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setErrorMessage("播放器載入失敗，請重新整理或開啟來源檢視。");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      hls?.destroy();
+      video.removeAttribute("src");
+      video.load();
+    };
+  }, [url]);
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        aria-label={`${title} 即時影像`}
+        controls
+        muted
+        playsInline
+        preload="metadata"
+      />
+      {errorMessage && (
+        <div className="stream-fallback visible">
+          <Video size={28} />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+    </>
   );
 }
 
