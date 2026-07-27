@@ -166,11 +166,13 @@ export function CameraMap({
           center: initialCamera?.center ?? TAIWAN_CENTER,
           clickableIcons: false,
           colorScheme: theme === "night" ? ColorScheme.DARK : ColorScheme.LIGHT,
+          disableDefaultUI: true,
           fullscreenControl: false,
           gestureHandling: "greedy",
           heading: initialCamera?.heading ?? 0,
           headingInteractionEnabled: false,
           isFractionalZoomEnabled: true,
+          keyboardShortcuts: false,
           mapTypeControl: false,
           maxZoom: 18,
           minZoom: 6,
@@ -180,7 +182,7 @@ export function CameraMap({
           tilt: 0,
           tiltInteractionEnabled: false,
           zoom: initialCamera?.zoom ?? 7,
-          zoomControl: true
+          zoomControl: false
         });
 
         setMap(nextMap);
