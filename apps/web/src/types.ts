@@ -225,6 +225,10 @@ export interface NearbyTourismResponse {
 export interface UserLocation {
   lat: number;
   lon: number;
+  accuracy: number;
+  heading?: number;
+  speed?: number;
+  timestamp: number;
 }
 
 export interface SearchPlace {

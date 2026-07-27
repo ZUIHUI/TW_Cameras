@@ -29,6 +29,19 @@ import {
 } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
+import {
+  bearingBetween,
+  type DeviceHeadingSample,
+  type DeviceOrientationEventConstructorWithPermission,
+  HEADING_BEARING_MIN_DISTANCE_METERS,
+  HEADING_UPDATE_INTERVAL_MS,
+  isFiniteNumber,
+  normalizeHeading,
+  orientationEventHeading,
+  resolveHeadingCandidate,
+  smoothHeading,
+  type CompassDeviceOrientationEvent
+} from "./locationHeading";
 import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
 import { getCurrentTimeTheme, type TimeTheme } from "./timeTheme";
 import type {
@@ -60,7 +73,7 @@ type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
 type MobileSheet = "search" | "layers" | "rain" | "nearby" | "favorites" | "detail";
 type ObservationTarget = { lat: number; lon: number; title: string };
-const LOCATION_FOLLOW_THRESHOLD_METERS = 25;
+const LOCATION_FOLLOW_THRESHOLD_METERS = 5;
 const MOBILE_BREAKPOINT_QUERY = "(max-width: 980px)";
 const RADAR_AUTO_REFRESH_MS = 10 * 60 * 1000;
 
@@ -88,6 +101,7 @@ export default function App() {
   const [userLocationFocusRequest, setUserLocationFocusRequest] = useState(0);
   const [locationFollowActive, setLocationFollowActive] = useState(false);
   const [locationFollowPaused, setLocationFollowPaused] = useState(false);
+  const [headingUpActive, setHeadingUpActive] = useState(false);
   const [visibleCount, setVisibleCount] = useState(80);
   const [loading, setLoading] = useState(true);
   const [loadingLocation, setLoadingLocation] = useState(false);
@@ -127,6 +141,12 @@ export default function App() {
   const locationRequestInFlight = useRef(false);
   const locationWatchIdRef = useRef<number | undefined>(undefined);
   const lastFollowLocationRef = useRef<UserLocation | undefined>(undefined);
+  const lastBearingAnchorRef = useRef<{ lat: number; lon: number } | undefined>(undefined);
+  const deviceHeadingRef = useRef<DeviceHeadingSample | undefined>(undefined);
+  const lastSmoothedHeadingRef = useRef<number | undefined>(undefined);
+  const lastHeadingPublishedAtRef = useRef(0);
+  const headingPermissionInFlightRef = useRef(false);
+  const headingSensorCleanupRef = useRef<(() => void) | undefined>(undefined);
   const focusNextLocationRef = useRef(false);
   const pendingLocationSuccessCallbacksRef = useRef<Array<() => void>>([]);
   const filterBeforePlaceSearch = useRef<CameraFilter>("all");
@@ -492,10 +512,21 @@ export default function App() {
   }
 
   function requestLocation(
-    options: { afterSuccess?: () => void; silent?: boolean; preserveFilter?: boolean; clearContext?: boolean; focus?: boolean } = {}
+    options: {
+      afterSuccess?: () => void;
+      silent?: boolean;
+      preserveFilter?: boolean;
+      clearContext?: boolean;
+      focus?: boolean;
+      enableHeadingSensor?: boolean;
+    } = {}
   ) {
     const shouldClearContext = options.clearContext ?? !options.silent;
     const shouldFocus = options.focus ?? !options.silent;
+
+    if (options.enableHeadingSensor) {
+      void enableDeviceHeading();
+    }
 
     setFocusedListFilter(undefined);
 
@@ -503,6 +534,7 @@ export default function App() {
       if (!options.silent) setError("此瀏覽器不支援定位，請改用可取得 GPS 的瀏覽器。");
       setLocationFollowActive(false);
       setLocationFollowPaused(false);
+      setHeadingUpActive(false);
       return;
     }
 
@@ -528,6 +560,7 @@ export default function App() {
 
     setLocationFollowActive(true);
     setLocationFollowPaused(false);
+    setHeadingUpActive(true);
 
     if (options.afterSuccess) {
       if (userLocation) {
@@ -560,23 +593,64 @@ export default function App() {
   }
 
   function handleLocationWatchSuccess(position: GeolocationPosition) {
+    const now = Date.now();
     const nextLocation = {
       lat: position.coords.latitude,
-      lon: position.coords.longitude
+      lon: position.coords.longitude,
+      accuracy: Math.max(1, position.coords.accuracy),
+      speed: isFiniteNumber(position.coords.speed) ? position.coords.speed : undefined,
+      timestamp: position.timestamp || now
+    };
+    const bearingAnchor = lastBearingAnchorRef.current;
+    const bearingMovementMeters = bearingAnchor
+      ? distanceKm(bearingAnchor, nextLocation) * 1000
+      : 0;
+
+    const calculatedHeading =
+      bearingAnchor && bearingMovementMeters >= HEADING_BEARING_MIN_DISTANCE_METERS
+        ? bearingBetween(bearingAnchor, nextLocation)
+        : undefined;
+    if (!bearingAnchor || isFiniteNumber(calculatedHeading)) {
+      lastBearingAnchorRef.current = nextLocation;
+    }
+    const headingCandidate = resolveHeadingCandidate({
+      calculatedHeading,
+      deviceHeading: deviceHeadingRef.current,
+      gpsHeading: position.coords.heading,
+      gpsSpeed: position.coords.speed,
+      now
+    });
+    const heading = isFiniteNumber(headingCandidate)
+      ? updateSmoothedHeading(headingCandidate, now)
+      : lastSmoothedHeadingRef.current;
+    const locatedUser: UserLocation = {
+      ...nextLocation,
+      heading
     };
     const previousLocation = lastFollowLocationRef.current;
     const movedEnough =
       !previousLocation || distanceKm(previousLocation, nextLocation) * 1000 >= LOCATION_FOLLOW_THRESHOLD_METERS;
+    const shouldUpdatePosition = movedEnough || focusNextLocationRef.current;
 
-    if (movedEnough) {
-      lastFollowLocationRef.current = nextLocation;
-      setUserLocation(nextLocation);
+    if (shouldUpdatePosition) {
+      lastFollowLocationRef.current = locatedUser;
     }
 
-    if (focusNextLocationRef.current) {
-      if (!movedEnough) {
-        setUserLocation(nextLocation);
+    setUserLocation((current) => {
+      if (!current || shouldUpdatePosition) {
+        return locatedUser;
       }
+
+      return {
+        ...current,
+        accuracy: locatedUser.accuracy,
+        heading: locatedUser.heading,
+        speed: locatedUser.speed,
+        timestamp: locatedUser.timestamp
+      };
+    });
+
+    if (focusNextLocationRef.current) {
       setUserLocationFocusRequest((request) => request + 1);
       focusNextLocationRef.current = false;
     }
@@ -592,6 +666,7 @@ export default function App() {
       clearLocationWatch();
       setLocationFollowActive(false);
       setLocationFollowPaused(false);
+      setHeadingUpActive(false);
       setLoadingLocation(false);
       locationRequestInFlight.current = false;
       focusNextLocationRef.current = false;
@@ -607,6 +682,7 @@ export default function App() {
 
     setLocationFollowActive(false);
     setLocationFollowPaused(true);
+    setHeadingUpActive(false);
     focusNextLocationRef.current = false;
   }
 
@@ -621,6 +697,91 @@ export default function App() {
       navigator.geolocation.clearWatch(locationWatchIdRef.current);
     }
     locationWatchIdRef.current = undefined;
+    lastBearingAnchorRef.current = undefined;
+    headingSensorCleanupRef.current?.();
+    headingSensorCleanupRef.current = undefined;
+    deviceHeadingRef.current = undefined;
+  }
+
+  function updateSmoothedHeading(nextHeading: number, timestamp: number) {
+    if (timestamp - lastHeadingPublishedAtRef.current < HEADING_UPDATE_INTERVAL_MS) {
+      return lastSmoothedHeadingRef.current;
+    }
+
+    lastHeadingPublishedAtRef.current = timestamp;
+    const smoothedHeading = smoothHeading(lastSmoothedHeadingRef.current, nextHeading);
+    lastSmoothedHeadingRef.current = smoothedHeading;
+    return smoothedHeading;
+  }
+
+  function publishDeviceHeading(nextHeading: number, timestamp: number) {
+    deviceHeadingRef.current = {
+      heading: normalizeHeading(nextHeading),
+      timestamp
+    };
+
+    const heading = updateSmoothedHeading(nextHeading, timestamp);
+    if (!isFiniteNumber(heading)) {
+      return;
+    }
+
+    setUserLocation((current) => {
+      if (!current || current.heading === heading) {
+        return current;
+      }
+
+      return {
+        ...current,
+        heading
+      };
+    });
+  }
+
+  function startDeviceHeadingListeners() {
+    if (headingSensorCleanupRef.current) {
+      return;
+    }
+
+    const handleOrientation = (rawEvent: Event) => {
+      const heading = orientationEventHeading(rawEvent as CompassDeviceOrientationEvent);
+      if (isFiniteNumber(heading)) {
+        publishDeviceHeading(heading, Date.now());
+      }
+    };
+
+    window.addEventListener("deviceorientationabsolute", handleOrientation);
+    window.addEventListener("deviceorientation", handleOrientation);
+    headingSensorCleanupRef.current = () => {
+      window.removeEventListener("deviceorientationabsolute", handleOrientation);
+      window.removeEventListener("deviceorientation", handleOrientation);
+    };
+  }
+
+  async function enableDeviceHeading() {
+    if (
+      headingSensorCleanupRef.current ||
+      headingPermissionInFlightRef.current ||
+      typeof window.DeviceOrientationEvent === "undefined"
+    ) {
+      return;
+    }
+
+    headingPermissionInFlightRef.current = true;
+    try {
+      const orientationEventConstructor =
+        window.DeviceOrientationEvent as unknown as DeviceOrientationEventConstructorWithPermission;
+      const permission = orientationEventConstructor.requestPermission
+        ? await orientationEventConstructor.requestPermission(true)
+        : "granted";
+
+      if (permission === "granted") {
+        startDeviceHeadingListeners();
+      }
+    } catch {
+      // GPS course remains available when orientation permission is denied or unsupported.
+    } finally {
+      headingPermissionInFlightRef.current = false;
+    }
   }
 
   function toggleFavorite(cameraId: string) {
@@ -1019,7 +1180,7 @@ export default function App() {
   }
 
   function openMobileLocationSearch() {
-    requestLocation();
+    requestLocation({ enableHeadingSensor: true });
   }
 
   function openMobileFavorites() {
@@ -1399,9 +1560,11 @@ export default function App() {
         userLocation={userLocation}
         userLocationFocusRequest={userLocationFocusRequest}
         followUserLocation={locationFollowActive}
+        headingUpActive={headingUpActive}
         theme={timeTheme}
         focusCameras={focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
+        onHeadingUpChange={setHeadingUpActive}
         onUserMapGesture={handleUserMapGesture}
         onViewportTargetChange={setMapViewportTarget}
       />
@@ -1508,7 +1671,7 @@ export default function App() {
           <button
             className={locationFollowActive ? "action-button active" : "action-button"}
             type="button"
-            onClick={() => requestLocation()}
+            onClick={() => requestLocation({ enableHeadingSensor: true })}
             disabled={loadingLocation}
             aria-pressed={locationFollowActive}
             title={locationFollowPaused ? "回到目前位置並恢復跟隨" : "移到目前位置"}
