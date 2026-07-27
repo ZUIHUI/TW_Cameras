@@ -107,6 +107,7 @@ const MOBILE_BREAKPOINT_QUERY = "(max-width: 980px)";
 const RADAR_AUTO_REFRESH_MS = 10 * 60 * 1000;
 const navigationMuteStorageKey = "taiwan-live-cam:navigation-muted";
 const navigationSessionStorageKey = "taiwan-live-cam:active-navigation";
+const navigationEntryEnabled = false;
 
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
@@ -2169,14 +2170,16 @@ export default function App() {
             <LocateFixed size={17} />
             {loadingLocation ? "定位中" : "附近影像"}
           </button>
-          <button
-            className={navigationPhase !== "idle" ? "action-button active" : "action-button"}
-            type="button"
-            onClick={openNavigationPlanner}
-          >
-            <Navigation size={17} />
-            導航
-          </button>
+          {navigationEntryEnabled && (
+            <button
+              className={navigationPhase !== "idle" ? "action-button active" : "action-button"}
+              type="button"
+              onClick={openNavigationPlanner}
+            >
+              <Navigation size={17} />
+              導航
+            </button>
+          )}
           <button
             className={rainModeActive ? "action-button active rain" : "action-button rain"}
             type="button"
@@ -2447,7 +2450,7 @@ export default function App() {
         />
       )}
 
-      {savedNavigation && navigationPhase === "idle" && (
+      {navigationEntryEnabled && savedNavigation && navigationPhase === "idle" && (
         <section className="navigation-resume-dialog" role="dialog" aria-label="恢復導航">
           <Navigation size={24} fill="currentColor" />
           <div>
@@ -2459,7 +2462,7 @@ export default function App() {
         </section>
       )}
 
-      {navigationPhase === "idle" && (
+      {navigationEntryEnabled && navigationPhase === "idle" && (
         <button className="mobile-navigation-launch" type="button" onClick={openNavigationPlanner}>
           <Navigation size={19} fill="currentColor" />
           導航
