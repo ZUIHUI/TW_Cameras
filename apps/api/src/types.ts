@@ -234,3 +234,97 @@ export interface SearchPlace {
   lat: number;
   lon: number;
 }
+
+export type RouteMode = "two-wheeler" | "walk" | "bicycle" | "transit";
+
+export interface RouteCoordinate {
+  lat: number;
+  lon: number;
+}
+
+export interface RouteRequest {
+  origin: RouteCoordinate;
+  destination: RouteCoordinate;
+  mode: RouteMode;
+  alternatives: true;
+  avoid?: {
+    tolls?: boolean;
+    highways?: boolean;
+    ferries?: boolean;
+  };
+  transit?: {
+    timeMode?: "now" | "depart-at" | "arrive-by";
+    dateTime?: string;
+    preference?: "default" | "less-walking" | "fewer-transfers";
+    modes?: Array<"bus" | "subway" | "train" | "light-rail" | "rail">;
+  };
+}
+
+export interface RouteViewport {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+}
+
+export interface RouteStop {
+  name: string;
+  lat?: number;
+  lon?: number;
+}
+
+export interface RouteTransitDetails {
+  arrivalStop?: RouteStop;
+  departureStop?: RouteStop;
+  arrivalTime?: string;
+  departureTime?: string;
+  headsign?: string;
+  headwaySeconds?: number;
+  stopCount?: number;
+  tripShortText?: string;
+  line?: {
+    name: string;
+    shortName?: string;
+    color?: string;
+    textColor?: string;
+    vehicleName?: string;
+    vehicleType?: string;
+  };
+}
+
+export interface RouteStep {
+  id: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  polyline: string;
+  start: RouteCoordinate;
+  end: RouteCoordinate;
+  instruction: string;
+  maneuver: string;
+  travelMode: string;
+  transit?: RouteTransitDetails;
+}
+
+export interface RouteLeg {
+  id: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  start: RouteCoordinate;
+  end: RouteCoordinate;
+  steps: RouteStep[];
+}
+
+export interface RouteOption {
+  id: string;
+  labels: string[];
+  distanceMeters: number;
+  durationSeconds: number;
+  viewport: RouteViewport;
+  polyline: string;
+  legs: RouteLeg[];
+  warnings: string[];
+}
+
+export interface RouteResponse {
+  routes: RouteOption[];
+}

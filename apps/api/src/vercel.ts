@@ -21,7 +21,7 @@ export function toErrorResponse(error: unknown): Response {
         error: "upstream_error",
         message: error.message
       },
-      { status: error.status >= 500 ? 502 : error.status }
+      { status: error.status === 503 ? 503 : error.status >= 500 ? 502 : error.status }
     );
   }
 

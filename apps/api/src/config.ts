@@ -27,6 +27,7 @@ export const config = {
   tdxCityCodes: process.env.TDX_CITY_CODES || "all",
   googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || "",
   googleGeocodingApiKey: process.env.GOOGLE_GEOCODING_API_KEY || "",
+  googleRoutesApiKey: process.env.GOOGLE_ROUTES_API_KEY || "",
   cwaApiKey: process.env.CWA_API_KEY || "",
   moenvApiKey: process.env.MOENV_API_KEY || "",
   wraApiKey: process.env.WRA_API_KEY || ""

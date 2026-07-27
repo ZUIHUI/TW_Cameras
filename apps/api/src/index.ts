@@ -20,6 +20,7 @@ import {
 import { getNearbyTourismSummary, parseNearbyTourismQuery } from "./adapters/nearbyTourism.js";
 import { getRadarOverlay } from "./adapters/radar.js";
 import { getNearbyRainfallSummary, parseRainfallQuery } from "./adapters/rainfall.js";
+import { computeRoutes, parseRouteRequest } from "./adapters/routes.js";
 import { config } from "./config.js";
 import { UpstreamError } from "./http.js";
 import { sources } from "./sources.js";
@@ -216,6 +217,15 @@ app.get<{
   return reply.code(400).send({ error: "invalid_query", message: "kind is required." });
 });
 
+app.post<{ Body: unknown }>("/api/routes", async (request, reply) => {
+  reply.header("cache-control", "no-store");
+  const parsed = parseRouteRequest(request.body);
+  if (!parsed.ok) {
+    return reply.code(400).send({ error: "invalid_request", message: parsed.message });
+  }
+  return computeRoutes(parsed.value);
+});
+
 app.get("/api/sources", async () => ({
   updatedAt: new Date().toISOString(),
   sources
@@ -224,7 +234,7 @@ app.get("/api/sources", async () => ({
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
   if (error instanceof UpstreamError) {
-    return reply.code(error.status >= 500 ? 502 : error.status).send({
+    return reply.code(error.status === 503 ? 503 : error.status >= 500 ? 502 : error.status).send({
       error: "upstream_error",
       message: error.message
     });
