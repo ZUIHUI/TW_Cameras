@@ -2469,64 +2469,6 @@ export default function App() {
         </button>
       )}
 
-      <nav className="mobile-bottom-nav" aria-label="手機快捷操作">
-        <button
-          className={activeMobileSheet === "search" ? "mobile-nav-button active" : "mobile-nav-button"}
-          type="button"
-          onClick={() => openMobileSheet("search")}
-        >
-          <Search size={19} />
-          <span>搜尋</span>
-        </button>
-        <button
-          className={locationFollowActive ? "mobile-nav-button active" : "mobile-nav-button"}
-          type="button"
-          onClick={openMobileLocationSearch}
-          disabled={loadingLocation}
-          aria-pressed={locationFollowActive}
-          title={locationFollowPaused ? "回到目前位置並恢復跟隨" : "移到目前位置"}
-        >
-          <LocateFixed size={19} />
-          <span>定位</span>
-        </button>
-        <button
-          className={rainModeActive || activeMobileSheet === "rain" ? "mobile-nav-button active rain" : "mobile-nav-button"}
-          type="button"
-          onClick={() => {
-            setActiveMobileSheet("rain");
-            setMobileSheetSnap("half");
-            setSelectedCamera(undefined);
-          }}
-        >
-          <CloudRain size={19} />
-          <span>雨天</span>
-        </button>
-        <button
-          className={activeMobileSheet === "layers" ? "mobile-nav-button active" : "mobile-nav-button"}
-          type="button"
-          onClick={() => openMobileSheet("layers")}
-        >
-          <Layers size={19} />
-          <span>圖層</span>
-        </button>
-        <button
-          className={activeMobileSheet === "nearby" ? "mobile-nav-button active" : "mobile-nav-button"}
-          type="button"
-          onClick={() => openMobileSheet("nearby")}
-        >
-          <MapPin size={19} />
-          <span>推薦</span>
-        </button>
-        <button
-          className={activeMobileSheet === "favorites" || (!activeMobileSheet && cameraFilter === "favorites") ? "mobile-nav-button active" : "mobile-nav-button"}
-          type="button"
-          onClick={openMobileFavorites}
-        >
-          <Star size={19} />
-          <span>收藏</span>
-        </button>
-      </nav>
-
       {activeMobileContextSheet && (
         <MobileContextSheet
           title={mobileSheetTitle(activeMobileContextSheet)}
