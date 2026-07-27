@@ -7,6 +7,8 @@ import type {
   PlacePrediction,
   RadarOverlayResponse,
   RainfallResponse,
+  RouteRequest,
+  RouteResponse,
   SearchPlace
 } from "./types";
 
@@ -142,4 +144,14 @@ export function getPlaceDetails(placeId: string): Promise<SearchPlace> {
     placeId
   });
   return fetchJson<SearchPlace>(`/google-places?${searchParams.toString()}`);
+}
+
+export function getRoutes(request: RouteRequest): Promise<RouteResponse> {
+  return fetchJson<RouteResponse>("/routes", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(request)
+  });
 }

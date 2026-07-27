@@ -8,6 +8,7 @@ import {
   LocateFixed,
   MapPin,
   Moon,
+  Navigation,
   RefreshCw,
   Search,
   Sun,
@@ -25,10 +26,12 @@ import {
   getPlaceDetails,
   getPlacePredictions,
   getRadarOverlay,
-  getRainfallNearby
+  getRainfallNearby,
+  getRoutes
 } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
+import { NavigationPlanner } from "./components/NavigationPlanner";
 import {
   bearingBetween,
   type DeviceHeadingSample,
@@ -51,9 +54,12 @@ import type {
   EnvironmentSummary,
   GoogleRestaurantItem,
   NearbyTourismResponse,
+  NavigationPhase,
+  NavigationPlan,
   PlacePrediction,
   RadarOverlayResponse,
   RainfallResponse,
+  RouteOption,
   SearchPlace,
   UserLocation,
   VisibleLayers
@@ -102,6 +108,12 @@ export default function App() {
   const [locationFollowActive, setLocationFollowActive] = useState(false);
   const [locationFollowPaused, setLocationFollowPaused] = useState(false);
   const [headingUpActive, setHeadingUpActive] = useState(false);
+  const [navigationPhase, setNavigationPhase] = useState<NavigationPhase>("idle");
+  const [navigationPlan, setNavigationPlan] = useState<NavigationPlan | undefined>();
+  const [navigationRoutes, setNavigationRoutes] = useState<RouteOption[]>([]);
+  const [selectedNavigationRouteId, setSelectedNavigationRouteId] = useState<string | undefined>();
+  const [navigationLoading, setNavigationLoading] = useState(false);
+  const [navigationError, setNavigationError] = useState("");
   const [visibleCount, setVisibleCount] = useState(80);
   const [loading, setLoading] = useState(true);
   const [loadingLocation, setLoadingLocation] = useState(false);
@@ -1183,6 +1195,42 @@ export default function App() {
     requestLocation({ enableHeadingSensor: true });
   }
 
+  function openNavigationPlanner() {
+    setSelectedCamera(undefined);
+    setActiveMobileSheet(undefined);
+    setNavigationError("");
+    setNavigationPhase((current) => (current === "preview" ? current : "planning"));
+  }
+
+  function closeNavigationPlanner() {
+    setNavigationPhase("idle");
+    setNavigationPlan(undefined);
+    setNavigationRoutes([]);
+    setSelectedNavigationRouteId(undefined);
+    setNavigationError("");
+  }
+
+  async function planNavigation(plan: NavigationPlan) {
+    setNavigationLoading(true);
+    setNavigationError("");
+    try {
+      const response = await getRoutes(plan.request);
+      setNavigationPlan(plan);
+      setNavigationRoutes(response.routes);
+      setSelectedNavigationRouteId(response.routes[0]?.id);
+      setNavigationPhase("preview");
+    } catch (reason) {
+      setNavigationPhase("error");
+      setNavigationError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setNavigationLoading(false);
+    }
+  }
+
+  function startNavigationFromPreview() {
+    setNavigationError("正在取得實際 GPS 位置並準備導航…");
+  }
+
   function openMobileFavorites() {
     setVisibleLayers((current) => ({ ...current, cameras: true }));
     selectCameraFilter("favorites");
@@ -1561,10 +1609,14 @@ export default function App() {
         userLocationFocusRequest={userLocationFocusRequest}
         followUserLocation={locationFollowActive}
         headingUpActive={headingUpActive}
+        navigationRoutes={navigationRoutes}
+        selectedNavigationRouteId={selectedNavigationRouteId}
+        navigationPreviewActive={navigationPhase === "preview"}
         theme={timeTheme}
         focusCameras={focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
         onHeadingUpChange={setHeadingUpActive}
+        onSelectNavigationRoute={setSelectedNavigationRouteId}
         onUserMapGesture={handleUserMapGesture}
         onViewportTargetChange={setMapViewportTarget}
       />
@@ -1678,6 +1730,14 @@ export default function App() {
           >
             <LocateFixed size={17} />
             {loadingLocation ? "定位中" : "附近影像"}
+          </button>
+          <button
+            className={navigationPhase !== "idle" ? "action-button active" : "action-button"}
+            type="button"
+            onClick={openNavigationPlanner}
+          >
+            <Navigation size={17} />
+            導航
           </button>
           <button
             className={rainModeActive ? "action-button active rain" : "action-button rain"}
@@ -1913,6 +1973,28 @@ export default function App() {
           </button>
         )}
       </aside>
+
+      {(navigationPhase === "planning" || navigationPhase === "preview" || navigationPhase === "error") && (
+        <NavigationPlanner
+          userLocation={userLocation}
+          routes={navigationRoutes}
+          selectedRouteId={selectedNavigationRouteId}
+          loading={navigationLoading}
+          error={navigationError}
+          initialPlan={navigationPlan}
+          onClose={closeNavigationPlanner}
+          onPlan={(plan) => void planNavigation(plan)}
+          onSelectRoute={setSelectedNavigationRouteId}
+          onStart={startNavigationFromPreview}
+        />
+      )}
+
+      {navigationPhase === "idle" && (
+        <button className="mobile-navigation-launch" type="button" onClick={openNavigationPlanner}>
+          <Navigation size={19} fill="currentColor" />
+          導航
+        </button>
+      )}
 
       <nav className="mobile-bottom-nav" aria-label="手機快捷操作">
         <button

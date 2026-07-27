@@ -2,8 +2,9 @@ import { MarkerClusterer, SuperClusterViewportAlgorithm } from "@googlemaps/mark
 import { useEffect, useRef, useState } from "react";
 import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
 import { isFiniteNumber, normalizeHeading } from "../locationHeading";
+import { decodePolyline } from "../navigationEngine";
 import type { TimeTheme } from "../timeTheme";
-import type { Camera, RadarOverlayResponse, SearchPlace, UserLocation } from "../types";
+import type { Camera, RadarOverlayResponse, RouteOption, SearchPlace, UserLocation } from "../types";
 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
 const VIEWPORT_PADDING_RATIO = 0.35;
@@ -25,10 +26,14 @@ interface CameraMapProps {
   userLocationFocusRequest?: number;
   followUserLocation?: boolean;
   headingUpActive?: boolean;
+  navigationRoutes?: RouteOption[];
+  selectedNavigationRouteId?: string;
+  navigationPreviewActive?: boolean;
   theme: TimeTheme;
   focusCameras?: Camera[];
   onSelectCamera: (camera: Camera) => void;
   onHeadingUpChange?: (active: boolean) => void;
+  onSelectNavigationRoute?: (routeId: string) => void;
   onUserMapGesture?: () => void;
   onViewportTargetChange?: (target: { lat: number; lon: number; title: string }) => void;
 }
@@ -55,10 +60,14 @@ export function CameraMap({
   userLocationFocusRequest,
   followUserLocation = false,
   headingUpActive = false,
+  navigationRoutes = [],
+  selectedNavigationRouteId,
+  navigationPreviewActive = false,
   theme,
   focusCameras,
   onSelectCamera,
   onHeadingUpChange,
+  onSelectNavigationRoute,
   onUserMapGesture,
   onViewportTargetChange
 }: CameraMapProps) {
@@ -72,9 +81,12 @@ export function CameraMap({
   const userHeadingMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const radarOverlayRef = useRef<google.maps.GroundOverlay | undefined>(undefined);
   const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
+  const navigationPolylineRefs = useRef<google.maps.Polyline[]>([]);
+  const navigationEndpointMarkerRefs = useRef<google.maps.Marker[]>([]);
   const mapCameraStateRef = useRef<MapCameraState | undefined>(undefined);
   const onSelectCameraRef = useRef(onSelectCamera);
   const onHeadingUpChangeRef = useRef(onHeadingUpChange);
+  const onSelectNavigationRouteRef = useRef(onSelectNavigationRoute);
   const onUserMapGestureRef = useRef(onUserMapGesture);
   const onViewportTargetChangeRef = useRef(onViewportTargetChange);
   const lastUserLocationFocusRequestRef = useRef(userLocationFocusRequest);
@@ -85,6 +97,7 @@ export function CameraMap({
 
   onSelectCameraRef.current = onSelectCamera;
   onHeadingUpChangeRef.current = onHeadingUpChange;
+  onSelectNavigationRouteRef.current = onSelectNavigationRoute;
   onUserMapGestureRef.current = onUserMapGesture;
   onViewportTargetChangeRef.current = onViewportTargetChange;
   const followedHeading =
@@ -522,6 +535,91 @@ export function CameraMap({
   useEffect(() => {
     if (!map) return;
 
+    navigationPolylineRefs.current.forEach((polyline) => polyline.setMap(null));
+    navigationEndpointMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    navigationPolylineRefs.current = [];
+    navigationEndpointMarkerRefs.current = [];
+
+    if (!navigationRoutes.length) {
+      return;
+    }
+
+    const selectedRoute = navigationRoutes.find((route) => route.id === selectedNavigationRouteId) || navigationRoutes[0];
+    const orderedRoutes = [
+      ...navigationRoutes.filter((route) => route.id !== selectedRoute.id),
+      selectedRoute
+    ];
+
+    orderedRoutes.forEach((route) => {
+      let path: google.maps.LatLngLiteral[];
+      try {
+        path = decodePolyline(route.polyline).map((coordinate) => ({
+          lat: coordinate.lat,
+          lng: coordinate.lon
+        }));
+      } catch {
+        return;
+      }
+
+      const selected = route.id === selectedRoute.id;
+      const polyline = new google.maps.Polyline({
+        clickable: true,
+        map,
+        path,
+        strokeColor: selected ? "#1a73e8" : "#78909c",
+        strokeOpacity: selected ? 0.96 : 0.7,
+        strokeWeight: selected ? 7 : 5,
+        zIndex: selected ? 12 : 8
+      });
+      polyline.addListener("click", () => onSelectNavigationRouteRef.current?.(route.id));
+      navigationPolylineRefs.current.push(polyline);
+    });
+
+    const firstLeg = selectedRoute.legs[0];
+    const lastLeg = selectedRoute.legs[selectedRoute.legs.length - 1];
+    if (firstLeg && lastLeg) {
+      navigationEndpointMarkerRefs.current = [
+        new google.maps.Marker({
+          map,
+          position: toLatLng(firstLeg.start),
+          icon: navigationEndpointIcon("#ffffff", "#1a73e8", 6),
+          title: "路線起點",
+          zIndex: google.maps.Marker.MAX_ZINDEX + 30
+        }),
+        new google.maps.Marker({
+          map,
+          position: toLatLng(lastLeg.end),
+          icon: navigationEndpointIcon("#1a73e8", "#ffffff", 8),
+          title: "目的地",
+          zIndex: google.maps.Marker.MAX_ZINDEX + 31
+        })
+      ];
+    }
+
+    if (navigationPreviewActive) {
+      map.moveCamera({ heading: 0, tilt: 0 });
+      map.fitBounds(
+        {
+          south: selectedRoute.viewport.south,
+          west: selectedRoute.viewport.west,
+          north: selectedRoute.viewport.north,
+          east: selectedRoute.viewport.east
+        },
+        72
+      );
+    }
+
+    return () => {
+      navigationPolylineRefs.current.forEach((polyline) => polyline.setMap(null));
+      navigationEndpointMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      navigationPolylineRefs.current = [];
+      navigationEndpointMarkerRefs.current = [];
+    };
+  }, [map, navigationPreviewActive, navigationRoutes, selectedNavigationRouteId]);
+
+  useEffect(() => {
+    if (!map) return;
+
     if (!userLocation) {
       return;
     }
@@ -640,6 +738,18 @@ function userHeadingIcon(rotation: number): google.maps.Symbol {
     strokeColor: "#ffffff",
     strokeOpacity: 0.72,
     strokeWeight: 1
+  };
+}
+
+function navigationEndpointIcon(fillColor: string, strokeColor: string, scale: number): google.maps.Symbol {
+  return {
+    fillColor,
+    fillOpacity: 1,
+    path: google.maps.SymbolPath.CIRCLE,
+    scale,
+    strokeColor,
+    strokeOpacity: 1,
+    strokeWeight: 3
   };
 }
 
