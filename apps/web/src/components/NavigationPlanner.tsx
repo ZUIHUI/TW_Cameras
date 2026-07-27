@@ -344,7 +344,7 @@ export function NavigationPlanner({
               <span className="navigation-route-distance">{formatDistance(route.distanceMeters)}</span>
             </button>
           ))}
-          <button className="navigation-start-button" type="button" onClick={onStart}>
+          <button className="navigation-start-button" type="button" onClick={onStart} disabled={loading}>
             <Navigation size={20} fill="currentColor" />
             開始
           </button>

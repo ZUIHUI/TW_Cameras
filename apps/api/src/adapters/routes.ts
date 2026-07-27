@@ -203,6 +203,8 @@ export function buildGoogleRoutesRequest(request: RouteRequest): Record<string, 
     destination: googleWaypoint(request.destination),
     travelMode: MODE_TO_GOOGLE[request.mode],
     computeAlternativeRoutes: request.alternatives,
+    polylineEncoding: "ENCODED_POLYLINE",
+    polylineQuality: "HIGH_QUALITY",
     languageCode: "zh-TW",
     regionCode: "TW",
     units: "METRIC"

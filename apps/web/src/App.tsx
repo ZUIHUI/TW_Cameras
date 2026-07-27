@@ -31,6 +31,7 @@ import {
 } from "./api";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
+import { NavigationHud } from "./components/NavigationHud";
 import { NavigationPlanner } from "./components/NavigationPlanner";
 import {
   bearingBetween,
@@ -46,6 +47,21 @@ import {
   type CompassDeviceOrientationEvent
 } from "./locationHeading";
 import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
+import {
+  advanceNavigation,
+  createInitialNavigationProgress,
+  distanceMeters as navigationDistanceMeters,
+  gpsSignalState,
+  prepareNavigationRoute,
+  type NavigationProgress,
+  type PreparedNavigationRoute
+} from "./navigationEngine";
+import { createNavigationDemo } from "./navigationDemo";
+import {
+  cancelNavigationSpeech,
+  nextVoiceAnnouncement,
+  speakNavigationAnnouncement
+} from "./navigationVoice";
 import { getCurrentTimeTheme, type TimeTheme } from "./timeTheme";
 import type {
   Camera,
@@ -79,9 +95,18 @@ type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
 type MobileSheet = "search" | "layers" | "rain" | "nearby" | "favorites" | "detail";
 type ObservationTarget = { lat: number; lon: number; title: string };
+interface SavedNavigationSession {
+  version: 1;
+  plan: NavigationPlan;
+  routes: RouteOption[];
+  selectedRouteId: string;
+  progress: NavigationProgress;
+}
 const LOCATION_FOLLOW_THRESHOLD_METERS = 5;
 const MOBILE_BREAKPOINT_QUERY = "(max-width: 980px)";
 const RADAR_AUTO_REFRESH_MS = 10 * 60 * 1000;
+const navigationMuteStorageKey = "taiwan-live-cam:navigation-muted";
+const navigationSessionStorageKey = "taiwan-live-cam:active-navigation";
 
 export default function App() {
   const [catalog, setCatalog] = useState<CameraCatalogResponse | undefined>();
@@ -107,13 +132,24 @@ export default function App() {
   const [userLocationFocusRequest, setUserLocationFocusRequest] = useState(0);
   const [locationFollowActive, setLocationFollowActive] = useState(false);
   const [locationFollowPaused, setLocationFollowPaused] = useState(false);
-  const [headingUpActive, setHeadingUpActive] = useState(false);
   const [navigationPhase, setNavigationPhase] = useState<NavigationPhase>("idle");
   const [navigationPlan, setNavigationPlan] = useState<NavigationPlan | undefined>();
   const [navigationRoutes, setNavigationRoutes] = useState<RouteOption[]>([]);
   const [selectedNavigationRouteId, setSelectedNavigationRouteId] = useState<string | undefined>();
   const [navigationLoading, setNavigationLoading] = useState(false);
   const [navigationError, setNavigationError] = useState("");
+  const [navigationProgress, setNavigationProgress] = useState<NavigationProgress>(() =>
+    createInitialNavigationProgress()
+  );
+  const [navigationLocation, setNavigationLocation] = useState<UserLocation | undefined>();
+  const [navigationCourse, setNavigationCourse] = useState(0);
+  const [navigationOverview, setNavigationOverview] = useState(false);
+  const [navigationStatusMessage, setNavigationStatusMessage] = useState("");
+  const [navigationMuted, setNavigationMuted] = useState(() => loadNavigationMuted());
+  const [navigationClock, setNavigationClock] = useState(Date.now());
+  const [savedNavigation, setSavedNavigation] = useState<SavedNavigationSession | undefined>(() =>
+    loadNavigationSession()
+  );
   const [visibleCount, setVisibleCount] = useState(80);
   const [loading, setLoading] = useState(true);
   const [loadingLocation, setLoadingLocation] = useState(false);
@@ -168,6 +204,24 @@ export default function App() {
   const suppressPanelHandleClick = useRef(false);
   const suppressMobileSheetHandleClick = useRef(false);
   const controlPanelContentRef = useRef<HTMLDivElement>(null);
+  const latestLocationRef = useRef<UserLocation | undefined>(undefined);
+  const navigationPhaseRef = useRef<NavigationPhase>("idle");
+  const navigationPlanRef = useRef<NavigationPlan | undefined>(undefined);
+  const navigationRoutesRef = useRef<RouteOption[]>([]);
+  const selectedNavigationRouteIdRef = useRef<string | undefined>(undefined);
+  const navigationProgressRef = useRef<NavigationProgress>(createInitialNavigationProgress());
+  const preparedNavigationRouteRef = useRef<PreparedNavigationRoute | undefined>(undefined);
+  const navigationMutedRef = useRef(navigationMuted);
+  const rerouteInFlightRef = useRef(false);
+  const spokenNavigationKeysRef = useRef<Set<string>>(new Set());
+  const wakeLockRef = useRef<WakeLockSentinel | undefined>(undefined);
+
+  navigationPhaseRef.current = navigationPhase;
+  navigationPlanRef.current = navigationPlan;
+  navigationRoutesRef.current = navigationRoutes;
+  selectedNavigationRouteIdRef.current = selectedNavigationRouteId;
+  navigationProgressRef.current = navigationProgress;
+  navigationMutedRef.current = navigationMuted;
 
   const summary = catalog?.summary;
   const nearbyTourismTarget = useMemo<ObservationTarget | undefined>(() => {
@@ -190,6 +244,13 @@ export default function App() {
     return undefined;
   }, [searchPlace, selectedCamera, userLocation]);
   const mapViewportTargetKey = mapViewportTarget ? coordinateBucket(mapViewportTarget) : "";
+  const navigationActive =
+    navigationPhase === "navigating" || navigationPhase === "rerouting" || navigationPhase === "arrived";
+  const selectedNavigationRoute =
+    navigationRoutes.find((route) => route.id === selectedNavigationRouteId) || navigationRoutes[0];
+  const activeNavigationSteps = selectedNavigationRoute?.legs.flatMap((leg) => leg.steps) || [];
+  const activeNavigationStep = activeNavigationSteps[navigationProgress.stepIndex];
+  const navigationSignal = gpsSignalState(navigationProgress.lastAcceptedFixAt, navigationClock);
 
   useEffect(() => {
     loadCameras();
@@ -200,7 +261,101 @@ export default function App() {
 
     return () => {
       clearLocationWatch();
+      cancelNavigationSpeech();
+      void releaseWakeLock();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !new URLSearchParams(window.location.search).has("navigation-demo")) {
+      return;
+    }
+
+    const demo = createNavigationDemo();
+    const prepared = prepareNavigationRoute(demo.route);
+    const firstFix = demo.fixes[0];
+    const firstProgress = advanceNavigation(
+      createInitialNavigationProgress(),
+      firstFix,
+      prepared,
+      demo.plan.request.mode
+    ).progress;
+    navigationPlanRef.current = demo.plan;
+    navigationRoutesRef.current = [demo.route];
+    selectedNavigationRouteIdRef.current = demo.route.id;
+    preparedNavigationRouteRef.current = prepared;
+    navigationProgressRef.current = firstProgress;
+    navigationPhaseRef.current = "navigating";
+    latestLocationRef.current = firstFix;
+    setNavigationPlan(demo.plan);
+    setNavigationRoutes([demo.route]);
+    setSelectedNavigationRouteId(demo.route.id);
+    setNavigationProgress(firstProgress);
+    setNavigationLocation(firstFix);
+    setNavigationCourse(firstProgress.routeBearing);
+    setNavigationOverview(false);
+    setNavigationPhase("navigating");
+    setSavedNavigation(undefined);
+
+    let index = 1;
+    const timer = window.setInterval(() => {
+      const fix = demo.fixes[index];
+      if (!fix) {
+        window.clearInterval(timer);
+        return;
+      }
+      handleNavigationFix(fix, fix.heading);
+      index += 1;
+    }, 900);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!navigationActive) {
+      return;
+    }
+    const timer = window.setInterval(() => setNavigationClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [navigationActive]);
+
+  useEffect(() => {
+    localStorage.setItem(navigationMuteStorageKey, navigationMuted ? "1" : "0");
+  }, [navigationMuted]);
+
+  useEffect(() => {
+    if (
+      !navigationActive ||
+      navigationPhase === "arrived" ||
+      !navigationPlan ||
+      !selectedNavigationRouteId
+    ) {
+      return;
+    }
+    saveNavigationSession({
+      version: 1,
+      plan: navigationPlan,
+      routes: navigationRoutes,
+      selectedRouteId: selectedNavigationRouteId,
+      progress: navigationProgress
+    });
+  }, [
+    navigationActive,
+    navigationPhase,
+    navigationPlan,
+    navigationProgress,
+    navigationRoutes,
+    selectedNavigationRouteId
+  ]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && navigationPhaseRef.current === "navigating") {
+        void acquireWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
   useEffect(() => {
@@ -546,7 +701,6 @@ export default function App() {
       if (!options.silent) setError("此瀏覽器不支援定位，請改用可取得 GPS 的瀏覽器。");
       setLocationFollowActive(false);
       setLocationFollowPaused(false);
-      setHeadingUpActive(false);
       return;
     }
 
@@ -572,10 +726,9 @@ export default function App() {
 
     setLocationFollowActive(true);
     setLocationFollowPaused(false);
-    setHeadingUpActive(true);
 
     if (options.afterSuccess) {
-      if (userLocation) {
+      if (latestLocationRef.current && Date.now() - latestLocationRef.current.timestamp <= 10000) {
         options.afterSuccess();
       } else {
         pendingLocationSuccessCallbacksRef.current.push(options.afterSuccess);
@@ -639,6 +792,19 @@ export default function App() {
       ...nextLocation,
       heading
     };
+    latestLocationRef.current = locatedUser;
+    const gpsCourse =
+      isFiniteNumber(position.coords.heading) &&
+      isFiniteNumber(position.coords.speed) &&
+      position.coords.speed >= 0.5
+        ? normalizeHeading(position.coords.heading)
+        : calculatedHeading;
+    if (
+      navigationPhaseRef.current === "navigating" ||
+      navigationPhaseRef.current === "rerouting"
+    ) {
+      handleNavigationFix(locatedUser, gpsCourse);
+    }
     const previousLocation = lastFollowLocationRef.current;
     const movedEnough =
       !previousLocation || distanceKm(previousLocation, nextLocation) * 1000 >= LOCATION_FOLLOW_THRESHOLD_METERS;
@@ -678,7 +844,6 @@ export default function App() {
       clearLocationWatch();
       setLocationFollowActive(false);
       setLocationFollowPaused(false);
-      setHeadingUpActive(false);
       setLoadingLocation(false);
       locationRequestInFlight.current = false;
       focusNextLocationRef.current = false;
@@ -694,11 +859,17 @@ export default function App() {
 
     setLocationFollowActive(false);
     setLocationFollowPaused(true);
-    setHeadingUpActive(false);
     focusNextLocationRef.current = false;
   }
 
   function handleUserMapGesture() {
+    if (
+      navigationPhaseRef.current === "navigating" ||
+      navigationPhaseRef.current === "rerouting"
+    ) {
+      setNavigationOverview(true);
+      return;
+    }
     pauseLocationFollow();
     setCameraFilter("all");
     setFocusedListFilter(undefined);
@@ -1228,7 +1399,269 @@ export default function App() {
   }
 
   function startNavigationFromPreview() {
-    setNavigationError("正在取得實際 GPS 位置並準備導航…");
+    const plan = navigationPlanRef.current;
+    const location = latestLocationRef.current || userLocation;
+    if (!plan) {
+      setNavigationError("請先規劃並選擇路線。");
+      return;
+    }
+
+    if (!location || Date.now() - location.timestamp > 10000) {
+      setNavigationError("正在取得最新 GPS 位置…");
+      requestLocation({
+        clearContext: false,
+        focus: false,
+        preserveFilter: true,
+        afterSuccess: () => {
+          const latest = latestLocationRef.current;
+          if (latest) void beginNavigation(plan, latest, true);
+        }
+      });
+      return;
+    }
+    void beginNavigation(plan, location, true);
+  }
+
+  async function beginNavigation(plan: NavigationPlan, location: UserLocation, confirmCustomOrigin: boolean) {
+    if (
+      confirmCustomOrigin &&
+      plan.originLabel !== "目前位置" &&
+      navigationDistanceMeters(plan.request.origin, location) > 100 &&
+      !window.confirm("開始導航會改用目前 GPS 位置重新規劃，是否繼續？")
+    ) {
+      return;
+    }
+
+    setNavigationLoading(true);
+    setNavigationError("");
+    setNavigationStatusMessage("");
+    setNavigationPhase("rerouting");
+    try {
+      const response = await getRoutes({
+        ...plan.request,
+        origin: { lat: location.lat, lon: location.lon }
+      });
+      const selectedIndex = Math.max(
+        0,
+        navigationRoutesRef.current.findIndex((route) => route.id === selectedNavigationRouteIdRef.current)
+      );
+      const selectedRoute = response.routes[Math.min(selectedIndex, response.routes.length - 1)] || response.routes[0];
+      if (!selectedRoute) {
+        throw new Error("沒有可開始導航的路線。");
+      }
+
+      const updatedPlan: NavigationPlan = {
+        ...plan,
+        originLabel: "目前位置",
+        request: {
+          ...plan.request,
+          origin: { lat: location.lat, lon: location.lon }
+        }
+      };
+      const prepared = prepareNavigationRoute(selectedRoute);
+      const initial = createInitialNavigationProgress();
+      const advanced = advanceNavigation(initial, location, prepared, updatedPlan.request.mode);
+
+      setNavigationPlan(updatedPlan);
+      setNavigationRoutes(response.routes);
+      setSelectedNavigationRouteId(selectedRoute.id);
+      setNavigationProgress(advanced.progress);
+      setNavigationLocation(location);
+      setNavigationCourse(advanced.progress.routeBearing);
+      setNavigationOverview(false);
+      setNavigationPhase(advanced.progress.arrived ? "arrived" : "navigating");
+      preparedNavigationRouteRef.current = prepared;
+      navigationProgressRef.current = advanced.progress;
+      navigationPlanRef.current = updatedPlan;
+      navigationRoutesRef.current = response.routes;
+      selectedNavigationRouteIdRef.current = selectedRoute.id;
+      spokenNavigationKeysRef.current.clear();
+      cancelNavigationSpeech();
+      setLocationFollowActive(false);
+      setLocationFollowPaused(false);
+      setSavedNavigation(undefined);
+      await acquireWakeLock();
+    } catch (reason) {
+      setNavigationPhase("preview");
+      setNavigationError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setNavigationLoading(false);
+    }
+  }
+
+  function handleNavigationFix(location: UserLocation, gpsCourse?: number) {
+    const prepared = preparedNavigationRouteRef.current;
+    const plan = navigationPlanRef.current;
+    if (!prepared || !plan || navigationPhaseRef.current === "arrived") {
+      return;
+    }
+
+    setNavigationLocation(location);
+    const result = advanceNavigation(
+      navigationProgressRef.current,
+      location,
+      prepared,
+      plan.request.mode
+    );
+    if (!result.accepted) {
+      return;
+    }
+
+    navigationProgressRef.current = result.progress;
+    setNavigationProgress(result.progress);
+    const nextCourse = isFiniteNumber(gpsCourse) ? normalizeHeading(gpsCourse) : result.progress.routeBearing;
+    setNavigationCourse(nextCourse);
+    setNavigationClock(Date.now());
+
+    const step = prepared.steps[result.progress.stepIndex]?.step;
+    if (
+      plan.request.mode === "transit" &&
+      step?.transit?.departureTime &&
+      Date.now() - Date.parse(step.transit.departureTime) > 5 * 60 * 1000
+    ) {
+      setNavigationStatusMessage("可能已錯過目前班次，請使用「重規劃」更新行程。");
+    }
+    const announcement = nextVoiceAnnouncement({
+      mode: plan.request.mode,
+      step,
+      stepIndex: result.progress.stepIndex,
+      distanceMeters: result.progress.distanceToStepEndMeters,
+      arrived: result.progress.arrived,
+      spokenKeys: spokenNavigationKeysRef.current
+    });
+    if (announcement) {
+      spokenNavigationKeysRef.current.add(announcement.key);
+      speakNavigationAnnouncement(announcement.text, navigationMutedRef.current);
+    }
+
+    if (result.progress.arrived) {
+      arriveNavigation();
+      return;
+    }
+    if (result.shouldReroute) {
+      void rerouteNavigation(location);
+    }
+  }
+
+  async function rerouteNavigation(location: UserLocation) {
+    const plan = navigationPlanRef.current;
+    if (!plan || rerouteInFlightRef.current) {
+      return;
+    }
+
+    rerouteInFlightRef.current = true;
+    setNavigationPhase("rerouting");
+    setNavigationStatusMessage("已偏離路線，正在重新規劃…");
+    cancelNavigationSpeech();
+    spokenNavigationKeysRef.current.clear();
+    try {
+      const response = await getRoutes({
+        ...plan.request,
+        origin: { lat: location.lat, lon: location.lon }
+      });
+      const selectedRoute = response.routes[0];
+      if (!selectedRoute) throw new Error("重新規劃沒有可用路線。");
+      const prepared = prepareNavigationRoute(selectedRoute);
+      const nextProgress = advanceNavigation(
+        createInitialNavigationProgress(Date.now()),
+        location,
+        prepared,
+        plan.request.mode
+      ).progress;
+      nextProgress.lastRerouteAt = Date.now();
+
+      setNavigationRoutes(response.routes);
+      setSelectedNavigationRouteId(selectedRoute.id);
+      setNavigationProgress(nextProgress);
+      setNavigationCourse(nextProgress.routeBearing);
+      setNavigationPhase("navigating");
+      setNavigationStatusMessage("");
+      navigationRoutesRef.current = response.routes;
+      selectedNavigationRouteIdRef.current = selectedRoute.id;
+      preparedNavigationRouteRef.current = prepared;
+      navigationProgressRef.current = nextProgress;
+    } catch (reason) {
+      setNavigationPhase("navigating");
+      setNavigationStatusMessage(
+        `重新規劃失敗：${reason instanceof Error ? reason.message : String(reason)}`
+      );
+    } finally {
+      rerouteInFlightRef.current = false;
+    }
+  }
+
+  function arriveNavigation() {
+    setNavigationPhase("arrived");
+    setNavigationOverview(false);
+    setNavigationStatusMessage("");
+    sessionStorage.removeItem(navigationSessionStorageKey);
+    void releaseWakeLock();
+  }
+
+  function stopNavigation() {
+    setNavigationPhase("idle");
+    setNavigationPlan(undefined);
+    setNavigationRoutes([]);
+    setSelectedNavigationRouteId(undefined);
+    setNavigationProgress(createInitialNavigationProgress());
+    setNavigationLocation(undefined);
+    setNavigationOverview(false);
+    setNavigationStatusMessage("");
+    preparedNavigationRouteRef.current = undefined;
+    spokenNavigationKeysRef.current.clear();
+    cancelNavigationSpeech();
+    sessionStorage.removeItem(navigationSessionStorageKey);
+    void releaseWakeLock();
+  }
+
+  async function acquireWakeLock() {
+    if (!("wakeLock" in navigator) || document.visibilityState !== "visible" || wakeLockRef.current) {
+      return;
+    }
+    try {
+      wakeLockRef.current = await navigator.wakeLock.request("screen");
+      wakeLockRef.current.addEventListener(
+        "release",
+        () => {
+          wakeLockRef.current = undefined;
+        },
+        { once: true }
+      );
+    } catch {
+      wakeLockRef.current = undefined;
+    }
+  }
+
+  async function releaseWakeLock() {
+    const wakeLock = wakeLockRef.current;
+    wakeLockRef.current = undefined;
+    if (wakeLock && !wakeLock.released) {
+      await wakeLock.release().catch(() => undefined);
+    }
+  }
+
+  function resumeSavedNavigation() {
+    const saved = savedNavigation;
+    if (!saved) return;
+    setNavigationPlan(saved.plan);
+    setNavigationRoutes(saved.routes);
+    setSelectedNavigationRouteId(saved.selectedRouteId);
+    setNavigationProgress(saved.progress);
+    setSavedNavigation(undefined);
+    requestLocation({
+      clearContext: false,
+      focus: false,
+      preserveFilter: true,
+      afterSuccess: () => {
+        const latest = latestLocationRef.current;
+        if (latest) void beginNavigation(saved.plan, latest, false);
+      }
+    });
+  }
+
+  function dismissSavedNavigation() {
+    setSavedNavigation(undefined);
+    sessionStorage.removeItem(navigationSessionStorageKey);
   }
 
   function openMobileFavorites() {
@@ -1598,24 +2031,29 @@ export default function App() {
   const timeTheme = themeOverride ?? autoTimeTheme;
 
   return (
-    <main className={`app-shell theme-${timeTheme}`} data-theme={timeTheme}>
+    <main
+      className={`app-shell theme-${timeTheme}${navigationActive ? " navigation-active" : ""}`}
+      data-theme={timeTheme}
+    >
       <CameraMap
-        cameras={filteredCameras}
-        selectedCamera={selectedCamera}
-        radarOverlay={visibleLayers.radar ? radarOverlay : undefined}
+        cameras={navigationActive ? [] : filteredCameras}
+        selectedCamera={navigationActive ? undefined : selectedCamera}
+        radarOverlay={!navigationActive && visibleLayers.radar ? radarOverlay : undefined}
         radarOpacity={radarOpacity}
-        searchPlace={searchPlace}
-        userLocation={userLocation}
+        searchPlace={navigationActive ? undefined : searchPlace}
+        userLocation={navigationActive ? navigationLocation : userLocation}
         userLocationFocusRequest={userLocationFocusRequest}
-        followUserLocation={locationFollowActive}
-        headingUpActive={headingUpActive}
+        followUserLocation={!navigationActive && locationFollowActive}
         navigationRoutes={navigationRoutes}
         selectedNavigationRouteId={selectedNavigationRouteId}
         navigationPreviewActive={navigationPhase === "preview"}
+        navigationActive={navigationActive}
+        navigationOverview={navigationOverview}
+        navigationHeading={navigationCourse}
+        navigationMode={navigationPlan?.request.mode}
         theme={timeTheme}
-        focusCameras={focusedListFilter ? filteredCameras : undefined}
+        focusCameras={!navigationActive && focusedListFilter ? filteredCameras : undefined}
         onSelectCamera={selectCamera}
-        onHeadingUpChange={setHeadingUpActive}
         onSelectNavigationRoute={setSelectedNavigationRouteId}
         onUserMapGesture={handleUserMapGesture}
         onViewportTargetChange={setMapViewportTarget}
@@ -1987,6 +2425,38 @@ export default function App() {
           onSelectRoute={setSelectedNavigationRouteId}
           onStart={startNavigationFromPreview}
         />
+      )}
+
+      {navigationActive && navigationPlan && selectedNavigationRoute && (
+        <NavigationHud
+          phase={navigationPhase}
+          mode={navigationPlan.request.mode}
+          progress={navigationProgress}
+          step={activeNavigationStep}
+          muted={navigationMuted}
+          overview={navigationOverview}
+          signal={navigationSignal}
+          statusMessage={navigationStatusMessage}
+          onToggleMute={() => setNavigationMuted((current) => !current)}
+          onToggleOverview={() => setNavigationOverview((current) => !current)}
+          onReplan={() => {
+            const latest = latestLocationRef.current;
+            if (latest) void rerouteNavigation(latest);
+          }}
+          onStop={stopNavigation}
+        />
+      )}
+
+      {savedNavigation && navigationPhase === "idle" && (
+        <section className="navigation-resume-dialog" role="dialog" aria-label="恢復導航">
+          <Navigation size={24} fill="currentColor" />
+          <div>
+            <strong>恢復前次導航？</strong>
+            <p>將重新取得 GPS 並從目前位置規劃到「{savedNavigation.plan.destination.title}」。</p>
+          </div>
+          <button type="button" onClick={resumeSavedNavigation}>恢復</button>
+          <button type="button" className="secondary" onClick={dismissSavedNavigation}>略過</button>
+        </section>
       )}
 
       {navigationPhase === "idle" && (
@@ -2746,4 +3216,42 @@ function sourceHealthText(status: "ok" | "partial" | "unavailable", errorCount: 
   }
 
   return "來源正常。";
+}
+
+function loadNavigationMuted() {
+  try {
+    return localStorage.getItem(navigationMuteStorageKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveNavigationSession(session: SavedNavigationSession) {
+  try {
+    sessionStorage.setItem(navigationSessionStorageKey, JSON.stringify(session));
+  } catch {
+    // Navigation continues when session storage is unavailable or full.
+  }
+}
+
+function loadNavigationSession(): SavedNavigationSession | undefined {
+  try {
+    const raw = sessionStorage.getItem(navigationSessionStorageKey);
+    if (!raw) return undefined;
+    const value = JSON.parse(raw) as Partial<SavedNavigationSession>;
+    if (
+      value.version !== 1 ||
+      !value.plan ||
+      !Array.isArray(value.routes) ||
+      !value.routes.length ||
+      typeof value.selectedRouteId !== "string" ||
+      !value.progress
+    ) {
+      sessionStorage.removeItem(navigationSessionStorageKey);
+      return undefined;
+    }
+    return value as SavedNavigationSession;
+  } catch {
+    return undefined;
+  }
 }

@@ -2,9 +2,9 @@ import { MarkerClusterer, SuperClusterViewportAlgorithm } from "@googlemaps/mark
 import { useEffect, useRef, useState } from "react";
 import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
 import { isFiniteNumber, normalizeHeading } from "../locationHeading";
-import { decodePolyline } from "../navigationEngine";
+import { decodePolyline, offsetCoordinate } from "../navigationEngine";
 import type { TimeTheme } from "../timeTheme";
-import type { Camera, RadarOverlayResponse, RouteOption, SearchPlace, UserLocation } from "../types";
+import type { Camera, RadarOverlayResponse, RouteMode, RouteOption, SearchPlace, UserLocation } from "../types";
 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
 const VIEWPORT_PADDING_RATIO = 0.35;
@@ -25,14 +25,16 @@ interface CameraMapProps {
   userLocation?: UserLocation;
   userLocationFocusRequest?: number;
   followUserLocation?: boolean;
-  headingUpActive?: boolean;
   navigationRoutes?: RouteOption[];
   selectedNavigationRouteId?: string;
   navigationPreviewActive?: boolean;
+  navigationActive?: boolean;
+  navigationOverview?: boolean;
+  navigationHeading?: number;
+  navigationMode?: RouteMode;
   theme: TimeTheme;
   focusCameras?: Camera[];
   onSelectCamera: (camera: Camera) => void;
-  onHeadingUpChange?: (active: boolean) => void;
   onSelectNavigationRoute?: (routeId: string) => void;
   onUserMapGesture?: () => void;
   onViewportTargetChange?: (target: { lat: number; lon: number; title: string }) => void;
@@ -59,14 +61,16 @@ export function CameraMap({
   userLocation,
   userLocationFocusRequest,
   followUserLocation = false,
-  headingUpActive = false,
   navigationRoutes = [],
   selectedNavigationRouteId,
   navigationPreviewActive = false,
+  navigationActive = false,
+  navigationOverview = false,
+  navigationHeading = 0,
+  navigationMode = "two-wheeler",
   theme,
   focusCameras,
   onSelectCamera,
-  onHeadingUpChange,
   onSelectNavigationRoute,
   onUserMapGesture,
   onViewportTargetChange
@@ -78,14 +82,13 @@ export function CameraMap({
   const renderedMarkerKeysRef = useRef<Set<string>>(new Set());
   const accuracyCircleRef = useRef<google.maps.Circle | undefined>(undefined);
   const userLocationMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
-  const userHeadingMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
+  const userHeadingOverlayRef = useRef<UserHeadingOverlay | undefined>(undefined);
   const radarOverlayRef = useRef<google.maps.GroundOverlay | undefined>(undefined);
   const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const navigationPolylineRefs = useRef<google.maps.Polyline[]>([]);
   const navigationEndpointMarkerRefs = useRef<google.maps.Marker[]>([]);
   const mapCameraStateRef = useRef<MapCameraState | undefined>(undefined);
   const onSelectCameraRef = useRef(onSelectCamera);
-  const onHeadingUpChangeRef = useRef(onHeadingUpChange);
   const onSelectNavigationRouteRef = useRef(onSelectNavigationRoute);
   const onUserMapGestureRef = useRef(onUserMapGesture);
   const onViewportTargetChangeRef = useRef(onViewportTargetChange);
@@ -96,14 +99,10 @@ export function CameraMap({
   const [loadError, setLoadError] = useState("");
 
   onSelectCameraRef.current = onSelectCamera;
-  onHeadingUpChangeRef.current = onHeadingUpChange;
   onSelectNavigationRouteRef.current = onSelectNavigationRoute;
   onUserMapGestureRef.current = onUserMapGesture;
   onViewportTargetChangeRef.current = onViewportTargetChange;
-  const followedHeading =
-    headingUpActive && isFiniteNumber(userLocation?.heading)
-      ? normalizeHeading(userLocation.heading)
-      : 0;
+  const followedHeading = navigationActive ? normalizeHeading(navigationHeading) : 0;
 
   function ensureMarker({
     color,
@@ -170,7 +169,7 @@ export function CameraMap({
           fullscreenControl: false,
           gestureHandling: "greedy",
           heading: initialCamera?.heading ?? 0,
-          headingInteractionEnabled: true,
+          headingInteractionEnabled: false,
           isFractionalZoomEnabled: true,
           mapTypeControl: false,
           maxZoom: 18,
@@ -302,7 +301,6 @@ export function CameraMap({
     if (!map) return;
 
     const listener = map.addListener("dragstart", () => {
-      onHeadingUpChangeRef.current?.(false);
       onUserMapGestureRef.current?.();
     });
 
@@ -426,13 +424,7 @@ export function CameraMap({
       strokeWeight: 1,
       zIndex: 2
     });
-    userHeadingMarkerRef.current = new google.maps.Marker({
-      clickable: false,
-      icon: userHeadingIcon(0),
-      optimized: false,
-      title: "目前位置與前進方向",
-      zIndex: google.maps.Marker.MAX_ZINDEX + 98
-    });
+    userHeadingOverlayRef.current = createUserHeadingOverlay(map);
     userLocationMarkerRef.current = new google.maps.Marker({
       clickable: false,
       icon: userLocationIcon(),
@@ -443,10 +435,10 @@ export function CameraMap({
 
     return () => {
       accuracyCircleRef.current?.setMap(null);
-      userHeadingMarkerRef.current?.setMap(null);
+      userHeadingOverlayRef.current?.setMap(null);
       userLocationMarkerRef.current?.setMap(null);
       accuracyCircleRef.current = undefined;
-      userHeadingMarkerRef.current = undefined;
+      userHeadingOverlayRef.current = undefined;
       userLocationMarkerRef.current = undefined;
     };
   }, [map]);
@@ -455,7 +447,7 @@ export function CameraMap({
     if (
       !map ||
       !accuracyCircleRef.current ||
-      !userHeadingMarkerRef.current ||
+      !userHeadingOverlayRef.current ||
       !userLocationMarkerRef.current
     ) {
       return;
@@ -463,7 +455,7 @@ export function CameraMap({
 
     if (!userLocation) {
       accuracyCircleRef.current.setMap(null);
-      userHeadingMarkerRef.current.setMap(null);
+      userHeadingOverlayRef.current.setVisible(false);
       userLocationMarkerRef.current.setMap(null);
       return;
     }
@@ -480,18 +472,16 @@ export function CameraMap({
     });
 
     if (isFiniteNumber(userLocation.heading)) {
-      userHeadingMarkerRef.current.setOptions({
-        icon: userHeadingIcon(normalizeHeading(userLocation.heading - mapHeading)),
-        map,
-        position,
-        visible: true
-      });
+      userHeadingOverlayRef.current.setPosition(position);
+      userHeadingOverlayRef.current.setHeading(normalizeHeading(userLocation.heading - mapHeading));
+      userHeadingOverlayRef.current.setVisible(!navigationActive);
     } else {
-      userHeadingMarkerRef.current.setMap(null);
+      userHeadingOverlayRef.current.setVisible(false);
     }
   }, [
     map,
     mapHeading,
+    navigationActive,
     userLocation?.accuracy,
     userLocation?.heading,
     userLocation?.lat,
@@ -596,7 +586,7 @@ export function CameraMap({
       ];
     }
 
-    if (navigationPreviewActive) {
+    if (navigationPreviewActive || navigationOverview) {
       map.moveCamera({ heading: 0, tilt: 0 });
       map.fitBounds(
         {
@@ -615,7 +605,7 @@ export function CameraMap({
       navigationPolylineRefs.current = [];
       navigationEndpointMarkerRefs.current = [];
     };
-  }, [map, navigationPreviewActive, navigationRoutes, selectedNavigationRouteId]);
+  }, [map, navigationOverview, navigationPreviewActive, navigationRoutes, selectedNavigationRouteId]);
 
   useEffect(() => {
     if (!map) return;
@@ -660,6 +650,46 @@ export function CameraMap({
     userLocation?.lat,
     userLocation?.lon
   ]);
+
+  useEffect(() => {
+    if (!map || !navigationActive || navigationOverview || !userLocation) return;
+
+    const lookAheadMeters =
+      navigationMode === "two-wheeler"
+        ? 110
+        : navigationMode === "bicycle"
+          ? 55
+          : navigationMode === "walk"
+            ? 32
+            : 50;
+    const center = offsetCoordinate(userLocation, followedHeading, lookAheadMeters);
+    map.moveCamera({
+      center: toLatLng(center),
+      heading: followedHeading,
+      tilt: navigationMode === "transit" ? 0 : 45,
+      zoom:
+        navigationMode === "two-wheeler"
+          ? 17.5
+          : navigationMode === "bicycle"
+            ? 18
+            : navigationMode === "walk"
+              ? 19
+              : 17
+    });
+  }, [
+    followedHeading,
+    map,
+    navigationActive,
+    navigationMode,
+    navigationOverview,
+    userLocation?.lat,
+    userLocation?.lon
+  ]);
+
+  useEffect(() => {
+    if (!map || navigationActive) return;
+    map.moveCamera({ heading: 0, tilt: 0 });
+  }, [map, navigationActive]);
 
   useEffect(() => {
     if (!map) return;
@@ -727,18 +757,61 @@ function userLocationIcon(): google.maps.Symbol {
   };
 }
 
-function userHeadingIcon(rotation: number): google.maps.Symbol {
-  return {
-    anchor: new google.maps.Point(0, 0),
-    fillColor: "#4285f4",
-    fillOpacity: 0.34,
-    path: "M 0 -25 L 13 5 L 0 1 L -13 5 Z",
-    rotation,
-    scale: 1,
-    strokeColor: "#ffffff",
-    strokeOpacity: 0.72,
-    strokeWeight: 1
-  };
+interface UserHeadingOverlay extends google.maps.OverlayView {
+  setHeading(heading: number): void;
+  setPosition(position: google.maps.LatLngLiteral): void;
+  setVisible(visible: boolean): void;
+}
+
+function createUserHeadingOverlay(map: google.maps.Map): UserHeadingOverlay {
+  class UserHeadingOverlayImpl extends google.maps.OverlayView {
+    private element?: HTMLDivElement;
+    private heading = 0;
+    private position?: google.maps.LatLngLiteral;
+    private visible = false;
+
+    onAdd() {
+      const element = document.createElement("div");
+      element.className = "user-heading-beam";
+      element.setAttribute("aria-hidden", "true");
+      this.element = element;
+      this.getPanes()?.overlayLayer.appendChild(element);
+    }
+
+    draw() {
+      if (!this.element || !this.position) return;
+      const point = this.getProjection().fromLatLngToDivPixel(new google.maps.LatLng(this.position));
+      if (!point) return;
+      this.element.style.left = `${point.x}px`;
+      this.element.style.top = `${point.y}px`;
+      this.element.style.display = this.visible ? "block" : "none";
+      this.element.style.transform = `translate(-50%, -50%) rotate(${this.heading}deg)`;
+    }
+
+    onRemove() {
+      this.element?.remove();
+      this.element = undefined;
+    }
+
+    setHeading(heading: number) {
+      this.heading = heading;
+      this.draw();
+    }
+
+    setPosition(position: google.maps.LatLngLiteral) {
+      this.position = position;
+      this.draw();
+    }
+
+    setVisible(visible: boolean) {
+      this.visible = visible;
+      this.draw();
+    }
+  }
+
+  const overlay = new UserHeadingOverlayImpl();
+  overlay.setMap(map);
+  return overlay;
 }
 
 function navigationEndpointIcon(fillColor: string, strokeColor: string, scale: number): google.maps.Symbol {

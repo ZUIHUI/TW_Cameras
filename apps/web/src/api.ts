@@ -35,7 +35,7 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 async function fetchJsonOnce<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), path === "/routes" ? 20000 : API_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
