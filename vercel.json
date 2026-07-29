@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
+  "regions": ["hkg1"],
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm -w run build:vercel",
   "outputDirectory": "dist"
