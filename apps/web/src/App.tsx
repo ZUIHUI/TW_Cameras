@@ -29,6 +29,7 @@ import {
   getRainfallNearby,
   getRoutes
 } from "./api";
+import { readCameraCatalogCache, writeCameraCatalogCache } from "./cameraCatalogCache";
 import { CameraMap } from "./components/CameraMap";
 import { DetailPanel } from "./components/DetailPanel";
 import { NavigationHud } from "./components/NavigationHud";
@@ -254,7 +255,39 @@ export default function App() {
   const navigationSignal = gpsSignalState(navigationProgress.lastAcceptedFixAt, navigationClock);
 
   useEffect(() => {
-    loadCameras();
+    let active = true;
+    const networkRequest = getCameras().then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (reason: unknown) => ({ status: "rejected" as const, reason })
+    );
+
+    void (async () => {
+      const cachedCatalog = await readCameraCatalogCache();
+      if (!active) return;
+
+      if (cachedCatalog) {
+        setCatalog(cachedCatalog);
+        setLoading(false);
+      }
+
+      const result = await networkRequest;
+      if (!active) return;
+
+      if (result.status === "fulfilled") {
+        setCatalog(result.value);
+        setError("");
+        setLoading(false);
+        void writeCameraCatalogCache(result.value);
+        return;
+      }
+
+      setError(cameraLoadErrorMessage(result.reason, Boolean(cachedCatalog)));
+      setLoading(false);
+    })();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -666,9 +699,9 @@ export default function App() {
     try {
       const nextCatalog = await getCameras();
       setCatalog(nextCatalog);
+      void writeCameraCatalogCache(nextCatalog);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(catalog ? `來源暫時不穩，已保留可用資料。${message}` : message);
+      setError(cameraLoadErrorMessage(err, Boolean(catalog)));
     } finally {
       setLoading(false);
     }
@@ -3085,6 +3118,11 @@ function getEmptyStateText({
 
 function normalize(value: string) {
   return value.toLowerCase().replaceAll("台", "臺").trim();
+}
+
+function cameraLoadErrorMessage(error: unknown, hasCatalog: boolean) {
+  const message = error instanceof Error ? error.message : String(error);
+  return hasCatalog ? `來源暫時不穩，已保留可用資料。${message}` : message;
 }
 
 function formatCountyTown(camera: Camera) {

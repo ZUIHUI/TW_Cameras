@@ -9,7 +9,7 @@
     "build:vercel": "node ../../node_modules/vite/bin/vite.js build --config ../../vite.config.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:navigation": "tsx --test test/routes.test.ts ../web/test/navigationEngine.test.ts ../web/test/cameraMarkerSync.test.ts"
+    "test:navigation": "tsx --test test/routes.test.ts test/vercelCache.test.ts ../web/test/navigationEngine.test.ts ../web/test/cameraMarkerSync.test.ts ../web/test/cameraCatalogCache.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",
