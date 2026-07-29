@@ -1,5 +1,10 @@
 import { MarkerClusterer, SuperClusterViewportAlgorithm } from "@googlemaps/markerclusterer";
 import { useEffect, useRef, useState } from "react";
+import {
+  cameraMarkerKey,
+  planCameraMarkerSync,
+  type CameraMarkerDescriptor
+} from "../cameraMarkerSync";
 import { GOOGLE_MAPS_API_KEY, loadGoogleMaps } from "../googleMaps";
 import { isFiniteNumber, normalizeHeading } from "../locationHeading";
 import { decodePolyline, offsetCoordinate } from "../navigationEngine";
@@ -7,7 +12,6 @@ import type { TimeTheme } from "../timeTheme";
 import type { Camera, RadarOverlayResponse, RouteMode, RouteOption, SearchPlace, UserLocation } from "../types";
 
 const TAIWAN_CENTER = { lat: 23.75, lng: 121 };
-const VIEWPORT_PADDING_RATIO = 0.35;
 
 const markerColors: Record<Camera["category"], string> = {
   freeway: "#0e6b52",
@@ -41,7 +45,10 @@ interface CameraMapProps {
 }
 
 interface MarkerEntry {
+  category: Camera["category"];
   marker: google.maps.Marker;
+  selected: boolean;
+  title: string;
 }
 
 type MarkerData = { item: Camera };
@@ -79,7 +86,9 @@ export function CameraMap({
   const clustererRef = useRef<MarkerClusterer | undefined>(undefined);
   const markerCacheRef = useRef<Map<string, MarkerEntry>>(new Map());
   const markerDataRef = useRef<Map<string, MarkerData>>(new Map());
-  const renderedMarkerKeysRef = useRef<Set<string>>(new Set());
+  const markerDescriptorRef = useRef<Map<string, CameraMarkerDescriptor>>(new Map());
+  const indexedMarkerKeysRef = useRef<Set<string>>(new Set());
+  const selectedMarkerKeyRef = useRef("");
   const accuracyCircleRef = useRef<google.maps.Circle | undefined>(undefined);
   const userLocationMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const userHeadingOverlayRef = useRef<UserHeadingOverlay | undefined>(undefined);
@@ -95,7 +104,6 @@ export function CameraMap({
   const lastUserLocationFocusRequestRef = useRef(userLocationFocusRequest);
   const [map, setMap] = useState<google.maps.Map | undefined>();
   const [mapHeading, setMapHeading] = useState(0);
-  const [viewportBounds, setViewportBounds] = useState<google.maps.LatLngBoundsLiteral | undefined>();
   const [loadError, setLoadError] = useState("");
 
   onSelectCameraRef.current = onSelectCamera;
@@ -105,13 +113,13 @@ export function CameraMap({
   const followedHeading = navigationActive ? normalizeHeading(navigationHeading) : 0;
 
   function ensureMarker({
-    color,
+    category,
     key,
     item,
     selected,
     title
   }: {
-    color: string;
+    category: Camera["category"];
     key: string;
     item: { lat: number; lon: number };
     selected: boolean;
@@ -119,15 +127,21 @@ export function CameraMap({
   }): MarkerEntry {
     const cached = markerCacheRef.current.get(key);
     if (cached) {
-      cached.marker.setIcon(markerIcon(color, selected));
-      cached.marker.setPosition({ lat: item.lat, lng: item.lon });
-      cached.marker.setTitle(title);
-      cached.marker.setZIndex(selected ? google.maps.Marker.MAX_ZINDEX + 1 : undefined);
+      if (cached.category !== category || cached.selected !== selected) {
+        cached.marker.setIcon(markerIcon(markerColors[category], selected));
+        cached.marker.setZIndex(selected ? google.maps.Marker.MAX_ZINDEX + 1 : undefined);
+        cached.category = category;
+        cached.selected = selected;
+      }
+      if (cached.title !== title) {
+        cached.marker.setTitle(title);
+        cached.title = title;
+      }
       return cached;
     }
 
     const marker = new google.maps.Marker({
-      icon: markerIcon(color, selected),
+      icon: markerIcon(markerColors[category], selected),
       optimized: true,
       position: { lat: item.lat, lng: item.lon },
       title,
@@ -141,9 +155,18 @@ export function CameraMap({
       onSelectCameraRef.current(markerData.item);
     });
 
-    const entry = { marker };
+    const entry = { category, marker, selected, title };
     markerCacheRef.current.set(key, entry);
     return entry;
+  }
+
+  function setMarkerSelected(key: string, selected: boolean) {
+    const entry = markerCacheRef.current.get(key);
+    if (!entry || entry.selected === selected) return;
+
+    entry.selected = selected;
+    entry.marker.setIcon(markerIcon(markerColors[entry.category], selected));
+    entry.marker.setZIndex(selected ? google.maps.Marker.MAX_ZINDEX + 1 : undefined);
   }
 
   useEffect(() => {
@@ -245,11 +268,13 @@ export function CameraMap({
     });
 
     return () => {
-      clustererRef.current?.clearMarkers();
+      clustererRef.current?.setMap(null);
+      clustererRef.current?.clearMarkers(true);
       markerCacheRef.current.forEach(({ marker }) => marker.setMap(null));
       markerCacheRef.current.clear();
       markerDataRef.current.clear();
-      renderedMarkerKeysRef.current.clear();
+      markerDescriptorRef.current.clear();
+      indexedMarkerKeysRef.current.clear();
       clustererRef.current = undefined;
     };
   }, [map]);
@@ -273,7 +298,7 @@ export function CameraMap({
   useEffect(() => {
     if (!map) return;
 
-    const syncViewportBounds = () => {
+    const syncViewportTarget = () => {
       const nextBounds = map.getBounds();
       const nextCenter = map.getCenter();
       if (!nextBounds || !nextCenter) return;
@@ -283,7 +308,6 @@ export function CameraMap({
         heading: normalizeHeading(map.getHeading() || 0),
         zoom: map.getZoom() || 7
       };
-      setViewportBounds(boundsToLiteral(nextBounds));
       onViewportTargetChangeRef.current?.({
         lat: nextCenter.lat(),
         lon: nextCenter.lng(),
@@ -291,8 +315,8 @@ export function CameraMap({
       });
     };
 
-    const listener = map.addListener("idle", syncViewportBounds);
-    syncViewportBounds();
+    const listener = map.addListener("idle", syncViewportTarget);
+    syncViewportTarget();
 
     return () => {
       listener.remove();
@@ -312,77 +336,85 @@ export function CameraMap({
   }, [map]);
 
   useEffect(() => {
-    if (!map || !clustererRef.current || !viewportBounds) return;
+    const clusterer = clustererRef.current;
+    if (!map || !clusterer) return;
 
-    const paddedBounds = padBounds(viewportBounds, VIEWPORT_PADDING_RATIO);
-    const selectedCameraKey = selectedCamera ? cameraMarkerKey(selectedCamera.id) : "";
-    const nextKeys = new Set<string>();
-    const validKeys = new Set<string>();
+    const plan = planCameraMarkerSync(cameras, markerDescriptorRef.current);
     const markersToAdd: google.maps.Marker[] = [];
     const markersToRemove: google.maps.Marker[] = [];
 
     cameras.forEach((camera) => {
       const key = cameraMarkerKey(camera.id);
-      validKeys.add(key);
       markerDataRef.current.set(key, { item: camera });
+    });
 
-      if (!isWithinBounds(camera, paddedBounds) && key !== selectedCameraKey) {
-        return;
+    plan.removedKeys.forEach((key) => {
+      markerDataRef.current.delete(key);
+    });
+
+    [...plan.removedKeys, ...plan.replaced.map(({ key }) => key)].forEach((key) => {
+      const entry = markerCacheRef.current.get(key);
+      if (!entry) return;
+
+      if (indexedMarkerKeysRef.current.delete(key)) {
+        markersToRemove.push(entry.marker);
       }
+      entry.marker.setMap(null);
+      markerCacheRef.current.delete(key);
+    });
 
-      nextKeys.add(key);
+    [...plan.added, ...plan.replaced].forEach((descriptor) => {
       const entry = ensureMarker({
-        key,
-        color: markerColors[camera.category],
-        item: camera,
-        selected: key === selectedCameraKey,
-        title: camera.title
+        category: descriptor.category,
+        key: descriptor.key,
+        item: descriptor,
+        selected: descriptor.key === selectedMarkerKeyRef.current,
+        title: descriptor.title
       });
-
-      if (!renderedMarkerKeysRef.current.has(key)) {
+      if (!indexedMarkerKeysRef.current.has(descriptor.key)) {
         markersToAdd.push(entry.marker);
+        indexedMarkerKeysRef.current.add(descriptor.key);
       }
     });
 
-    markerCacheRef.current.forEach((entry, key) => {
-      if (!validKeys.has(key)) {
-        if (renderedMarkerKeysRef.current.has(key)) {
-          markersToRemove.push(entry.marker);
-        }
-        entry.marker.setMap(null);
-        markerCacheRef.current.delete(key);
-        markerDataRef.current.delete(key);
-        renderedMarkerKeysRef.current.delete(key);
-      }
-    });
-
-    renderedMarkerKeysRef.current.forEach((key) => {
-      if (!nextKeys.has(key)) {
-        const entry = markerCacheRef.current.get(key);
-        if (entry) {
-          markersToRemove.push(entry.marker);
-          entry.marker.setMap(null);
-        }
-      }
+    plan.updated.forEach((descriptor) => {
+      ensureMarker({
+        category: descriptor.category,
+        key: descriptor.key,
+        item: descriptor,
+        selected: descriptor.key === selectedMarkerKeyRef.current,
+        title: descriptor.title
+      });
     });
 
     if (markersToRemove.length) {
-      clustererRef.current.removeMarkers(markersToRemove, true);
+      clusterer.removeMarkers(markersToRemove, true);
     }
     if (markersToAdd.length) {
-      clustererRef.current.addMarkers(markersToAdd, true);
+      clusterer.addMarkers(markersToAdd, true);
     }
-    if (markersToRemove.length || markersToAdd.length || selectedCameraKey) {
-      clustererRef.current.render();
+    if (markersToRemove.length || markersToAdd.length) {
+      clusterer.render();
     }
 
-    renderedMarkerKeysRef.current = nextKeys;
-  }, [
-    cameras,
-    map,
-    selectedCamera?.id,
-    viewportBounds
-  ]);
+    markerDescriptorRef.current = plan.next;
+  }, [cameras, map]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    const previousKey = selectedMarkerKeyRef.current;
+    const nextKey = selectedCamera ? cameraMarkerKey(selectedCamera.id) : "";
+    if (previousKey === nextKey) return;
+
+    selectedMarkerKeyRef.current = nextKey;
+    if (previousKey) {
+      setMarkerSelected(previousKey, false);
+    }
+    if (nextKey) {
+      setMarkerSelected(nextKey, true);
+    }
+  }, [map, selectedCamera?.id]);
 
   useEffect(() => {
     if (!map) return;
@@ -837,37 +869,6 @@ function markerIcon(color: string, selected: boolean): google.maps.Symbol {
     strokeColor: "#ffffff",
     strokeWeight: selected ? 4 : 3
   };
-}
-
-function cameraMarkerKey(id: string) {
-  return `camera:${id}`;
-}
-
-function boundsToLiteral(bounds: google.maps.LatLngBounds): google.maps.LatLngBoundsLiteral {
-  const northEast = bounds.getNorthEast();
-  const southWest = bounds.getSouthWest();
-  return {
-    east: northEast.lng(),
-    north: northEast.lat(),
-    south: southWest.lat(),
-    west: southWest.lng()
-  };
-}
-
-function padBounds(bounds: google.maps.LatLngBoundsLiteral, ratio: number): google.maps.LatLngBoundsLiteral {
-  const latPadding = Math.max(0.01, (bounds.north - bounds.south) * ratio);
-  const lngPadding = Math.max(0.01, (bounds.east - bounds.west) * ratio);
-
-  return {
-    east: bounds.east + lngPadding,
-    north: bounds.north + latPadding,
-    south: bounds.south - latPadding,
-    west: bounds.west - lngPadding
-  };
-}
-
-function isWithinBounds(item: { lat: number; lon: number }, bounds: google.maps.LatLngBoundsLiteral) {
-  return item.lat >= bounds.south && item.lat <= bounds.north && item.lon >= bounds.west && item.lon <= bounds.east;
 }
 
 function mapBackgroundColor(theme: TimeTheme) {
