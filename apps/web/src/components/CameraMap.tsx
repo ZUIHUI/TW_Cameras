@@ -1,4 +1,8 @@
-import { MarkerClusterer, SuperClusterViewportAlgorithm } from "@googlemaps/markerclusterer";
+import {
+  MarkerClusterer,
+  SuperClusterViewportAlgorithm,
+  type Marker
+} from "@googlemaps/markerclusterer";
 import { useEffect, useRef, useState } from "react";
 import {
   cameraMarkerKey,
@@ -59,6 +63,20 @@ interface MapCameraState {
   zoom: number;
 }
 
+class CameraMarkerClusterer extends MarkerClusterer {
+  setRenderedMarkersVisible(visible: boolean) {
+    this.clusters.forEach(({ marker }) => {
+      if (marker && isLegacyMarker(marker)) {
+        marker.setVisible(visible);
+      }
+    });
+  }
+}
+
+function isLegacyMarker(marker: Marker): marker is google.maps.Marker {
+  return typeof (marker as google.maps.Marker).setVisible === "function";
+}
+
 export function CameraMap({
   cameras,
   selectedCamera,
@@ -83,11 +101,12 @@ export function CameraMap({
   onViewportTargetChange
 }: CameraMapProps) {
   const mapElementRef = useRef<HTMLDivElement>(null);
-  const clustererRef = useRef<MarkerClusterer | undefined>(undefined);
+  const clustererRef = useRef<CameraMarkerClusterer | undefined>(undefined);
   const markerCacheRef = useRef<Map<string, MarkerEntry>>(new Map());
   const markerDataRef = useRef<Map<string, MarkerData>>(new Map());
   const markerDescriptorRef = useRef<Map<string, CameraMarkerDescriptor>>(new Map());
   const indexedMarkerKeysRef = useRef<Set<string>>(new Set());
+  const cameraMarkersSuppressedRef = useRef(false);
   const selectedMarkerKeyRef = useRef("");
   const accuracyCircleRef = useRef<google.maps.Circle | undefined>(undefined);
   const userLocationMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
@@ -236,7 +255,7 @@ export function CameraMap({
   useEffect(() => {
     if (!map) return;
 
-    clustererRef.current = new MarkerClusterer({
+    clustererRef.current = new CameraMarkerClusterer({
       map,
       markers: [],
       algorithm: new SuperClusterViewportAlgorithm({
@@ -299,6 +318,9 @@ export function CameraMap({
     if (!map) return;
 
     const syncViewportTarget = () => {
+      cameraMarkersSuppressedRef.current = false;
+      clustererRef.current?.setRenderedMarkersVisible(true);
+
       const nextBounds = map.getBounds();
       const nextCenter = map.getCenter();
       if (!nextBounds || !nextCenter) return;
@@ -326,12 +348,21 @@ export function CameraMap({
   useEffect(() => {
     if (!map) return;
 
-    const listener = map.addListener("dragstart", () => {
+    const suppressCameraMarkers = () => {
+      if (cameraMarkersSuppressedRef.current) return;
+
+      cameraMarkersSuppressedRef.current = true;
+      clustererRef.current?.setRenderedMarkersVisible(false);
+    };
+    const dragListener = map.addListener("dragstart", () => {
+      suppressCameraMarkers();
       onUserMapGestureRef.current?.();
     });
+    const zoomListener = map.addListener("zoom_changed", suppressCameraMarkers);
 
     return () => {
-      listener.remove();
+      dragListener.remove();
+      zoomListener.remove();
     };
   }, [map]);
 
@@ -395,6 +426,9 @@ export function CameraMap({
     }
     if (markersToRemove.length || markersToAdd.length) {
       clusterer.render();
+    }
+    if (cameraMarkersSuppressedRef.current) {
+      clusterer.setRenderedMarkersVisible(false);
     }
 
     markerDescriptorRef.current = plan.next;

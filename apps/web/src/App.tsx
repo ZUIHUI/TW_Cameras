@@ -47,6 +47,11 @@ import {
   smoothHeading,
   type CompassDeviceOrientationEvent
 } from "./locationHeading";
+import {
+  mapViewportTargetKey,
+  normalizeMapViewportTarget,
+  type MapViewportTarget
+} from "./mapViewportPerformance";
 import { NearbyTourismBlock } from "./components/NearbyTourismBlock";
 import {
   advanceNavigation,
@@ -95,7 +100,7 @@ const timeThemeStorageKey = "taiwan-live-cam:time-theme";
 type FocusedListFilter = Extract<CameraFilter, "scenic" | "favorites">;
 type ControlPanelSnap = "hidden" | "half" | "full";
 type MobileSheet = "search" | "layers" | "rain" | "nearby" | "favorites" | "detail";
-type ObservationTarget = { lat: number; lon: number; title: string };
+type ObservationTarget = MapViewportTarget;
 interface SavedNavigationSession {
   version: 1;
   plan: NavigationPlan;
@@ -181,7 +186,6 @@ export default function App() {
   const [mobileSheetSnap, setMobileSheetSnap] = useState<ControlPanelSnap>("half");
   const [mobileSheetDragOffset, setMobileSheetDragOffset] = useState(0);
   const [isMobileViewport, setIsMobileViewport] = useState(getIsMobileViewport);
-  const [mapViewportTarget, setMapViewportTarget] = useState<ObservationTarget | undefined>();
   const [mapDataTarget, setMapDataTarget] = useState<ObservationTarget | undefined>();
   const [autoTimeTheme, setAutoTimeTheme] = useState<TimeTheme>(() => getCurrentTimeTheme());
   const [themeOverride, setThemeOverride] = useState<TimeTheme | undefined>(() => loadTimeThemePreference());
@@ -206,6 +210,8 @@ export default function App() {
   const suppressPanelHandleClick = useRef(false);
   const suppressMobileSheetHandleClick = useRef(false);
   const controlPanelContentRef = useRef<HTMLDivElement>(null);
+  const mapViewportUpdateTimeoutRef = useRef<number | undefined>(undefined);
+  const mapDataTargetKeyRef = useRef("");
   const latestLocationRef = useRef<UserLocation | undefined>(undefined);
   const navigationPhaseRef = useRef<NavigationPhase>("idle");
   const navigationPlanRef = useRef<NavigationPlan | undefined>(undefined);
@@ -245,7 +251,6 @@ export default function App() {
     }
     return undefined;
   }, [searchPlace, selectedCamera, userLocation]);
-  const mapViewportTargetKey = mapViewportTarget ? coordinateBucket(mapViewportTarget) : "";
   const navigationActive =
     navigationPhase === "navigating" || navigationPhase === "rerouting" || navigationPhase === "arrived";
   const selectedNavigationRoute =
@@ -416,21 +421,12 @@ export default function App() {
     return () => query.removeEventListener("change", syncViewport);
   }, []);
 
-  useEffect(() => {
-    if (!mapViewportTarget) {
-      setMapDataTarget(undefined);
-      return;
-    }
-
-    const nextTarget = roundedObservationTarget(mapViewportTarget);
-    const timeout = window.setTimeout(() => {
-      setMapDataTarget((current) => (coordinateBucket(current) === coordinateBucket(nextTarget) ? current : nextTarget));
-    }, 450);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [mapViewportTargetKey]);
+  useEffect(
+    () => () => {
+      window.clearTimeout(mapViewportUpdateTimeoutRef.current);
+    },
+    []
+  );
 
   useEffect(() => {
     const county = selectedCamera?.county;
@@ -2061,6 +2057,23 @@ export default function App() {
     });
   }
 
+  function scheduleMapViewportTargetUpdate(target: ObservationTarget) {
+    const nextTarget = normalizeMapViewportTarget(target);
+    const nextKey = mapViewportTargetKey(nextTarget);
+
+    window.clearTimeout(mapViewportUpdateTimeoutRef.current);
+    if (mapDataTargetKeyRef.current === nextKey) {
+      mapViewportUpdateTimeoutRef.current = undefined;
+      return;
+    }
+
+    mapViewportUpdateTimeoutRef.current = window.setTimeout(() => {
+      mapViewportUpdateTimeoutRef.current = undefined;
+      mapDataTargetKeyRef.current = nextKey;
+      setMapDataTarget(nextTarget);
+    }, 450);
+  }
+
   const activeMobileContextSheet = activeMobileSheet && activeMobileSheet !== "detail" ? activeMobileSheet : undefined;
   const timeTheme = themeOverride ?? autoTimeTheme;
 
@@ -2090,7 +2103,7 @@ export default function App() {
         onSelectCamera={selectCamera}
         onSelectNavigationRoute={setSelectedNavigationRouteId}
         onUserMapGesture={handleUserMapGesture}
-        onViewportTargetChange={setMapViewportTarget}
+        onViewportTargetChange={scheduleMapViewportTargetUpdate}
       />
 
       <aside
@@ -3080,18 +3093,6 @@ function isTimeTheme(value: unknown): value is TimeTheme {
 
 function getIsMobileViewport() {
   return typeof window !== "undefined" ? window.matchMedia(MOBILE_BREAKPOINT_QUERY).matches : false;
-}
-
-function roundedObservationTarget(target: ObservationTarget): ObservationTarget {
-  return {
-    ...target,
-    lat: Number(target.lat.toFixed(3)),
-    lon: Number(target.lon.toFixed(3))
-  };
-}
-
-function coordinateBucket(target?: Pick<ObservationTarget, "lat" | "lon">) {
-  return target ? `${target.lat.toFixed(3)}:${target.lon.toFixed(3)}` : "";
 }
 
 function getEmptyStateText({
