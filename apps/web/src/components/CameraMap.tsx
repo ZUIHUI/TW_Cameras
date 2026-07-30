@@ -109,7 +109,7 @@ export function CameraMap({
   const cameraMarkersSuppressedRef = useRef(false);
   const selectedMarkerKeyRef = useRef("");
   const accuracyCircleRef = useRef<google.maps.Circle | undefined>(undefined);
-  const userLocationMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
+  const userLocationOverlayRef = useRef<UserLocationOverlay | undefined>(undefined);
   const userHeadingOverlayRef = useRef<UserHeadingOverlay | undefined>(undefined);
   const radarOverlayRef = useRef<google.maps.GroundOverlay | undefined>(undefined);
   const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
@@ -493,21 +493,15 @@ export function CameraMap({
       zIndex: 2
     });
     userHeadingOverlayRef.current = createUserHeadingOverlay(map);
-    userLocationMarkerRef.current = new google.maps.Marker({
-      clickable: false,
-      icon: userLocationIcon(),
-      optimized: false,
-      title: "目前位置",
-      zIndex: google.maps.Marker.MAX_ZINDEX + 100
-    });
+    userLocationOverlayRef.current = createUserLocationOverlay(map);
 
     return () => {
       accuracyCircleRef.current?.setMap(null);
       userHeadingOverlayRef.current?.setMap(null);
-      userLocationMarkerRef.current?.setMap(null);
+      userLocationOverlayRef.current?.setMap(null);
       accuracyCircleRef.current = undefined;
       userHeadingOverlayRef.current = undefined;
-      userLocationMarkerRef.current = undefined;
+      userLocationOverlayRef.current = undefined;
     };
   }, [map]);
 
@@ -516,7 +510,7 @@ export function CameraMap({
       !map ||
       !accuracyCircleRef.current ||
       !userHeadingOverlayRef.current ||
-      !userLocationMarkerRef.current
+      !userLocationOverlayRef.current
     ) {
       return;
     }
@@ -524,7 +518,7 @@ export function CameraMap({
     if (!userLocation) {
       accuracyCircleRef.current.setMap(null);
       userHeadingOverlayRef.current.setVisible(false);
-      userLocationMarkerRef.current.setMap(null);
+      userLocationOverlayRef.current.setVisible(false);
       return;
     }
 
@@ -534,10 +528,8 @@ export function CameraMap({
       map,
       radius: Math.max(1, userLocation.accuracy)
     });
-    userLocationMarkerRef.current.setOptions({
-      map,
-      position
-    });
+    userLocationOverlayRef.current.setPosition(position);
+    userLocationOverlayRef.current.setVisible(true);
 
     if (isFiniteNumber(userLocation.heading)) {
       userHeadingOverlayRef.current.setPosition(position);
@@ -813,16 +805,56 @@ function toLatLng(location: { lat: number; lon: number }): google.maps.LatLngLit
   return { lat: location.lat, lng: location.lon };
 }
 
-function userLocationIcon(): google.maps.Symbol {
-  return {
-    fillColor: "#4285f4",
-    fillOpacity: 1,
-    path: google.maps.SymbolPath.CIRCLE,
-    scale: 8,
-    strokeColor: "#ffffff",
-    strokeOpacity: 1,
-    strokeWeight: 3
-  };
+interface UserLocationOverlay extends google.maps.OverlayView {
+  setPosition(position: google.maps.LatLngLiteral): void;
+  setVisible(visible: boolean): void;
+}
+
+function createUserLocationOverlay(map: google.maps.Map): UserLocationOverlay {
+  class UserLocationOverlayImpl extends google.maps.OverlayView {
+    private element?: HTMLDivElement;
+    private position?: google.maps.LatLngLiteral;
+    private visible = false;
+
+    onAdd() {
+      const element = document.createElement("div");
+      const core = document.createElement("div");
+      element.className = "user-location-dot";
+      element.setAttribute("aria-hidden", "true");
+      core.className = "user-location-dot-core";
+      element.appendChild(core);
+      this.element = element;
+      this.getPanes()?.overlayLayer.appendChild(element);
+    }
+
+    draw() {
+      if (!this.element || !this.position) return;
+      const point = this.getProjection().fromLatLngToDivPixel(new google.maps.LatLng(this.position));
+      if (!point) return;
+      this.element.style.left = `${point.x}px`;
+      this.element.style.top = `${point.y}px`;
+      this.element.style.display = this.visible ? "grid" : "none";
+    }
+
+    onRemove() {
+      this.element?.remove();
+      this.element = undefined;
+    }
+
+    setPosition(position: google.maps.LatLngLiteral) {
+      this.position = position;
+      this.draw();
+    }
+
+    setVisible(visible: boolean) {
+      this.visible = visible;
+      this.draw();
+    }
+  }
+
+  const overlay = new UserLocationOverlayImpl();
+  overlay.setMap(map);
+  return overlay;
 }
 
 interface UserHeadingOverlay extends google.maps.OverlayView {

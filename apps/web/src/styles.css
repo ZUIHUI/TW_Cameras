@@ -3488,6 +3488,55 @@ h1 {
   will-change: left, top, transform;
 }
 
+.user-location-dot {
+  position: absolute;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 1px 4px rgba(15, 23, 42, 0.34),
+    0 0 0 1px rgba(37, 99, 235, 0.08);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  will-change: left, top;
+}
+
+.user-location-dot-core {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #4285f4;
+  transform: scale(0.6875);
+  animation: user-location-breathe 3s infinite;
+  will-change: transform;
+}
+
+@keyframes user-location-breathe {
+  0% {
+    transform: scale(0.6875);
+    animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+
+  72% {
+    transform: scale(1);
+    animation-timing-function: cubic-bezier(0.55, 0.06, 0.68, 0.19);
+  }
+
+  100% {
+    transform: scale(0.6875);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-location-dot-core {
+    animation: none;
+    transform: scale(1);
+  }
+}
+
 .app-shell.navigation-active .control-panel,
 .app-shell.navigation-active .mobile-bottom-nav,
 .app-shell.navigation-active .mobile-context-sheet,
