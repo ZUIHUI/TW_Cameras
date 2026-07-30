@@ -110,7 +110,6 @@ export function CameraMap({
   const selectedMarkerKeyRef = useRef("");
   const accuracyCircleRef = useRef<google.maps.Circle | undefined>(undefined);
   const userLocationOverlayRef = useRef<UserLocationOverlay | undefined>(undefined);
-  const userHeadingOverlayRef = useRef<UserHeadingOverlay | undefined>(undefined);
   const radarOverlayRef = useRef<google.maps.GroundOverlay | undefined>(undefined);
   const searchMarkerRef = useRef<google.maps.Marker | undefined>(undefined);
   const navigationPolylineRefs = useRef<google.maps.Polyline[]>([]);
@@ -492,15 +491,12 @@ export function CameraMap({
       strokeWeight: 1,
       zIndex: 2
     });
-    userHeadingOverlayRef.current = createUserHeadingOverlay(map);
     userLocationOverlayRef.current = createUserLocationOverlay(map);
 
     return () => {
       accuracyCircleRef.current?.setMap(null);
-      userHeadingOverlayRef.current?.setMap(null);
       userLocationOverlayRef.current?.setMap(null);
       accuracyCircleRef.current = undefined;
-      userHeadingOverlayRef.current = undefined;
       userLocationOverlayRef.current = undefined;
     };
   }, [map]);
@@ -509,7 +505,6 @@ export function CameraMap({
     if (
       !map ||
       !accuracyCircleRef.current ||
-      !userHeadingOverlayRef.current ||
       !userLocationOverlayRef.current
     ) {
       return;
@@ -517,7 +512,6 @@ export function CameraMap({
 
     if (!userLocation) {
       accuracyCircleRef.current.setMap(null);
-      userHeadingOverlayRef.current.setVisible(false);
       userLocationOverlayRef.current.setVisible(false);
       return;
     }
@@ -532,11 +526,10 @@ export function CameraMap({
     userLocationOverlayRef.current.setVisible(true);
 
     if (isFiniteNumber(userLocation.heading)) {
-      userHeadingOverlayRef.current.setPosition(position);
-      userHeadingOverlayRef.current.setHeading(normalizeHeading(userLocation.heading - mapHeading));
-      userHeadingOverlayRef.current.setVisible(!navigationActive);
+      userLocationOverlayRef.current.setHeading(normalizeHeading(userLocation.heading - mapHeading));
+      userLocationOverlayRef.current.setHeadingVisible(!navigationActive);
     } else {
-      userHeadingOverlayRef.current.setVisible(false);
+      userLocationOverlayRef.current.setHeadingVisible(false);
     }
   }, [
     map,
@@ -806,23 +799,34 @@ function toLatLng(location: { lat: number; lon: number }): google.maps.LatLngLit
 }
 
 interface UserLocationOverlay extends google.maps.OverlayView {
+  setHeading(heading: number): void;
+  setHeadingVisible(visible: boolean): void;
   setPosition(position: google.maps.LatLngLiteral): void;
   setVisible(visible: boolean): void;
 }
 
 function createUserLocationOverlay(map: google.maps.Map): UserLocationOverlay {
   class UserLocationOverlayImpl extends google.maps.OverlayView {
+    private beam?: HTMLDivElement;
     private element?: HTMLDivElement;
+    private heading = 0;
+    private headingVisible = false;
     private position?: google.maps.LatLngLiteral;
     private visible = false;
 
     onAdd() {
       const element = document.createElement("div");
+      const beam = document.createElement("div");
+      const dot = document.createElement("div");
       const core = document.createElement("div");
-      element.className = "user-location-dot";
+      element.className = "user-location-overlay";
       element.setAttribute("aria-hidden", "true");
+      beam.className = "user-heading-beam";
+      dot.className = "user-location-dot";
       core.className = "user-location-dot-core";
-      element.appendChild(core);
+      dot.appendChild(core);
+      element.append(beam, dot);
+      this.beam = beam;
       this.element = element;
       this.getPanes()?.overlayLayer.appendChild(element);
     }
@@ -833,12 +837,27 @@ function createUserLocationOverlay(map: google.maps.Map): UserLocationOverlay {
       if (!point) return;
       this.element.style.left = `${point.x}px`;
       this.element.style.top = `${point.y}px`;
-      this.element.style.display = this.visible ? "grid" : "none";
+      this.element.style.display = this.visible ? "block" : "none";
+      if (this.beam) {
+        this.beam.style.display = this.headingVisible ? "block" : "none";
+        this.beam.style.transform = `rotate(${this.heading}deg)`;
+      }
     }
 
     onRemove() {
       this.element?.remove();
+      this.beam = undefined;
       this.element = undefined;
+    }
+
+    setHeading(heading: number) {
+      this.heading = heading;
+      this.draw();
+    }
+
+    setHeadingVisible(visible: boolean) {
+      this.headingVisible = visible;
+      this.draw();
     }
 
     setPosition(position: google.maps.LatLngLiteral) {
@@ -853,63 +872,6 @@ function createUserLocationOverlay(map: google.maps.Map): UserLocationOverlay {
   }
 
   const overlay = new UserLocationOverlayImpl();
-  overlay.setMap(map);
-  return overlay;
-}
-
-interface UserHeadingOverlay extends google.maps.OverlayView {
-  setHeading(heading: number): void;
-  setPosition(position: google.maps.LatLngLiteral): void;
-  setVisible(visible: boolean): void;
-}
-
-function createUserHeadingOverlay(map: google.maps.Map): UserHeadingOverlay {
-  class UserHeadingOverlayImpl extends google.maps.OverlayView {
-    private element?: HTMLDivElement;
-    private heading = 0;
-    private position?: google.maps.LatLngLiteral;
-    private visible = false;
-
-    onAdd() {
-      const element = document.createElement("div");
-      element.className = "user-heading-beam";
-      element.setAttribute("aria-hidden", "true");
-      this.element = element;
-      this.getPanes()?.overlayLayer.appendChild(element);
-    }
-
-    draw() {
-      if (!this.element || !this.position) return;
-      const point = this.getProjection().fromLatLngToDivPixel(new google.maps.LatLng(this.position));
-      if (!point) return;
-      this.element.style.left = `${point.x}px`;
-      this.element.style.top = `${point.y}px`;
-      this.element.style.display = this.visible ? "block" : "none";
-      this.element.style.transform = `translate(-50%, -50%) rotate(${this.heading}deg)`;
-    }
-
-    onRemove() {
-      this.element?.remove();
-      this.element = undefined;
-    }
-
-    setHeading(heading: number) {
-      this.heading = heading;
-      this.draw();
-    }
-
-    setPosition(position: google.maps.LatLngLiteral) {
-      this.position = position;
-      this.draw();
-    }
-
-    setVisible(visible: boolean) {
-      this.visible = visible;
-      this.draw();
-    }
-  }
-
-  const overlay = new UserHeadingOverlayImpl();
   overlay.setMap(map);
   return overlay;
 }

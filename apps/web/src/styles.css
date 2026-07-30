@@ -3468,9 +3468,19 @@ h1 {
   }
 }
 
+.user-location-overlay {
+  position: absolute;
+  width: 106px;
+  height: 106px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  will-change: left, top;
+}
+
 .user-heading-beam {
   position: absolute;
   z-index: 1;
+  inset: 0;
   width: 106px;
   height: 106px;
   pointer-events: none;
@@ -3485,14 +3495,17 @@ h1 {
       rgba(66, 133, 244, 0) 100%
     );
   filter: drop-shadow(0 -1px 1px rgba(255, 255, 255, 0.44));
-  will-change: left, top, transform;
+  will-change: transform;
 }
 
 .user-location-dot {
   position: absolute;
   z-index: 2;
+  top: 50%;
+  left: 50%;
   width: 22px;
   height: 22px;
+  display: grid;
   place-items: center;
   border-radius: 50%;
   background: #ffffff;
